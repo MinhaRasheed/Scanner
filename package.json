@@ -1,0 +1,10 @@
+{
+  "name": "network-device-scanner",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "server": "cd server && node server.js",
+    "client": "cd client && npm run dev",
+    "install:all": "cd server && npm install && cd ../client && npm install"
+  }
+}

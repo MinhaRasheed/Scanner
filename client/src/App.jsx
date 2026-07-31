@@ -5,6 +5,7 @@ import StatsBar from './components/StatsBar'
 import ScanAnimation from './components/ScanAnimation'
 import FilterBar from './components/FilterBar'
 import AuthPage from './pages/AuthPage'
+import AdminPage from './pages/AdminPage'
 import { useAuth } from './context/AuthContext'
 import './App.css'
 
@@ -12,8 +13,15 @@ const SOCKET_URL = 'http://localhost:3001'
 
 export default function App() {
   const { user, loading, logout } = useAuth()
+  const [page, setPage] = useState('dashboard')
+
   if (loading) return <div className="app-loading"><span className="auth-spin">⟳</span></div>
   if (!user) return <AuthPage />
+
+  return <Dashboard user={user} logout={logout} page={page} setPage={setPage} />
+}
+
+function Dashboard({ user, logout, page, setPage }) {
   const [devices, setDevices] = useState([])
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
@@ -28,60 +36,34 @@ export default function App() {
   useEffect(() => {
     const socket = io(SOCKET_URL)
     socketRef.current = socket
-
     socket.on('connect', () => setConnected(true))
     socket.on('disconnect', () => setConnected(false))
-
-    socket.on('device_list', (list) => {
-      setDevices(list)
-      setScanning(false)
-      setLastScan(Date.now())
-    })
-
+    socket.on('device_list', (list) => { setDevices(list); setScanning(false); setLastScan(Date.now()) })
     socket.on('device_update', ({ type, device }) => {
       setDevices(prev => {
         const idx = prev.findIndex(d => d.ip === device.ip)
-        if (idx >= 0) {
-          const updated = [...prev]
-          updated[idx] = device
-          return updated
-        }
+        if (idx >= 0) { const u = [...prev]; u[idx] = device; return u }
         return [...prev, device]
       })
       addNotification(type, device)
     })
-
-    fetch(`${SOCKET_URL}/api/subnet`)
-      .then(r => r.json())
-      .then(d => setSubnet(d.subnet))
-      .catch(() => {})
-
+    fetch(`${SOCKET_URL}/api/subnet`).then(r => r.json()).then(d => setSubnet(d.subnet)).catch(() => {})
     return () => socket.disconnect()
   }, [])
 
   function addNotification(type, device) {
     const id = ++notifId.current
-    const msg = type === 'new'
-      ? `New device: ${device.hostname}`
-      : type === 'reconnected'
-      ? `Reconnected: ${device.hostname}`
-      : `Disconnected: ${device.hostname}`
+    const msg = type === 'new' ? `New device: ${device.hostname}` : type === 'reconnected' ? `Reconnected: ${device.hostname}` : `Disconnected: ${device.hostname}`
     const color = type === 'disconnected' ? '#ef4444' : '#22c55e'
     setNotifications(prev => [...prev, { id, msg, color }])
     setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000)
   }
 
-  function triggerScan() {
-    setScanning(true)
-    socketRef.current?.emit('manual_scan')
-  }
+  function triggerScan() { setScanning(true); socketRef.current?.emit('manual_scan') }
 
   const filtered = devices
     .filter(d => filter === 'all' || d.status === filter)
-    .filter(d => {
-      const q = search.toLowerCase()
-      return !q || d.ip.includes(q) || d.hostname?.toLowerCase().includes(q) || d.mac?.toLowerCase().includes(q)
-    })
+    .filter(d => { const q = search.toLowerCase(); return !q || d.ip.includes(q) || d.hostname?.toLowerCase().includes(q) || d.mac?.toLowerCase().includes(q) })
     .sort((a, b) => {
       if (a.status === 'online' && b.status !== 'online') return -1
       if (b.status === 'online' && a.status !== 'online') return 1
@@ -123,24 +105,37 @@ export default function App() {
               <p className="logo-sub">Network Device Scanner</p>
             </div>
           </div>
+
+          {/* Nav tabs */}
+          <nav className="nav-tabs">
+            <button className={`nav-tab ${page === 'dashboard' ? 'nav-tab-active' : ''}`} onClick={() => setPage('dashboard')}>
+              🌐 Dashboard
+            </button>
+            {user.role === 'admin' && (
+              <button className={`nav-tab ${page === 'admin' ? 'nav-tab-active' : ''}`} onClick={() => setPage('admin')}>
+                🛡️ Admin
+              </button>
+            )}
+          </nav>
         </div>
+
         <div className="header-right">
           <div className={`connection-badge ${connected ? 'badge-live' : 'badge-offline'}`}>
             <span className={`pulse-dot ${connected ? 'pulse-green' : 'pulse-red'}`} />
             {connected ? 'Live' : 'Offline'}
           </div>
           {subnet && <div className="subnet-badge">{subnet}.0/24</div>}
-          {lastScan && (
-            <div className="last-scan-time">
-              {new Date(lastScan).toLocaleTimeString()}
-            </div>
+          {lastScan && <div className="last-scan-time">{new Date(lastScan).toLocaleTimeString()}</div>}
+          {page === 'dashboard' && (
+            <button className={`scan-btn ${scanning ? 'scan-btn-active' : ''}`} onClick={triggerScan} disabled={scanning}>
+              <span className={scanning ? 'spin' : ''}>⟳</span>
+              {scanning ? 'Scanning...' : 'Scan Now'}
+            </button>
           )}
-          <button className={`scan-btn ${scanning ? 'scan-btn-active' : ''}`} onClick={triggerScan} disabled={scanning}>
-            <span className={scanning ? 'spin' : ''}>⟳</span>
-            {scanning ? 'Scanning...' : 'Scan Now'}
-          </button>
           <div className="user-menu">
-            <div className="user-avatar">{user.name.charAt(0).toUpperCase()}</div>
+            <div className="user-avatar" style={{ background: user.role === 'admin' ? 'linear-gradient(135deg,#a855f7,#7c3aed)' : undefined }}>
+              {user.name.charAt(0).toUpperCase()}
+            </div>
             <div className="user-info">
               <div className="user-name">{user.name}</div>
               <div className="user-role">{user.role}</div>
@@ -151,29 +146,26 @@ export default function App() {
       </header>
 
       <main className="main">
-        <StatsBar online={online} offline={offline} total={devices.length} scanning={scanning} />
-
-        {scanning && <ScanAnimation subnet={subnet} />}
-
-        <FilterBar filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} />
-
-        {filtered.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">{scanning ? '📡' : devices.length === 0 ? '🔍' : '🔎'}</div>
-            <p className="empty-text">
-              {scanning
-                ? 'Scanning your network...'
-                : devices.length === 0
-                ? 'No devices found yet. Click Scan Now to begin.'
-                : 'No devices match your filter.'}
-            </p>
-          </div>
+        {page === 'admin' ? (
+          <AdminPage />
         ) : (
-          <div className="device-grid">
-            {filtered.map(device => (
-              <DeviceCard key={device.ip} device={device} />
-            ))}
-          </div>
+          <>
+            <StatsBar online={online} offline={offline} total={devices.length} scanning={scanning} />
+            {scanning && <ScanAnimation subnet={subnet} />}
+            <FilterBar filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} />
+            {filtered.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-icon">{scanning ? '📡' : devices.length === 0 ? '🔍' : '🔎'}</div>
+                <p className="empty-text">
+                  {scanning ? 'Scanning your network...' : devices.length === 0 ? 'No devices found yet. Click Scan Now to begin.' : 'No devices match your filter.'}
+                </p>
+              </div>
+            ) : (
+              <div className="device-grid">
+                {filtered.map(device => <DeviceCard key={device.ip} device={device} />)}
+              </div>
+            )}
+          </>
         )}
       </main>
     </div>

@@ -137,6 +137,38 @@ body {
   letter-spacing: 0.08em;
 }
 
+/* Nav tabs */
+.nav-tabs {
+  display: flex;
+  gap: 4px;
+  margin-left: 24px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 4px;
+}
+
+.nav-tab {
+  padding: 7px 16px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.nav-tab:hover { color: #94a3b8; background: rgba(255,255,255,0.04); }
+
+.nav-tab-active {
+  background: rgba(0,212,255,0.1) !important;
+  color: #00d4ff !important;
+  border: 1px solid rgba(0,212,255,0.2);
+}
+
 .connection-badge {
   display: flex;
   align-items: center;

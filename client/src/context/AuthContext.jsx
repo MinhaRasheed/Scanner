@@ -41,8 +41,7 @@ export function AuthProvider({ children }) {
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'Registration failed')
-    localStorage.setItem('netscan_token', data.token)
-    setUser(data.user)
+    // Do NOT auto-login — let the user sign in manually
     return data.user
   }
 

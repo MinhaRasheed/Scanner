@@ -12,8 +12,14 @@ import './App.css'
 const SOCKET_URL = 'http://localhost:3001'
 
 export default function App() {
-  const { user, loading, logout } = useAuth()
+  const { user, loading, logout, loginMode } = useAuth()
   const [page, setPage] = useState('dashboard')
+
+  // Auto-open admin panel when user logged in via admin portal
+  useEffect(() => {
+    if (user && loginMode === 'admin') setPage('admin')
+    else if (!user) setPage('dashboard')
+  }, [user, loginMode])
 
   if (loading) return <div className="app-loading"><span className="auth-spin">⟳</span></div>
   if (!user) return <AuthPage />

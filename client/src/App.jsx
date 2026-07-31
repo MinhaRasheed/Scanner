@@ -4,11 +4,16 @@ import DeviceCard from './components/DeviceCard'
 import StatsBar from './components/StatsBar'
 import ScanAnimation from './components/ScanAnimation'
 import FilterBar from './components/FilterBar'
+import AuthPage from './pages/AuthPage'
+import { useAuth } from './context/AuthContext'
 import './App.css'
 
 const SOCKET_URL = 'http://localhost:3001'
 
 export default function App() {
+  const { user, loading, logout } = useAuth()
+  if (loading) return <div className="app-loading"><span className="auth-spin">⟳</span></div>
+  if (!user) return <AuthPage />
   const [devices, setDevices] = useState([])
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
@@ -134,6 +139,14 @@ export default function App() {
             <span className={scanning ? 'spin' : ''}>⟳</span>
             {scanning ? 'Scanning...' : 'Scan Now'}
           </button>
+          <div className="user-menu">
+            <div className="user-avatar">{user.name.charAt(0).toUpperCase()}</div>
+            <div className="user-info">
+              <div className="user-name">{user.name}</div>
+              <div className="user-role">{user.role}</div>
+            </div>
+            <button className="logout-btn" onClick={logout} title="Sign out">⏻</button>
+          </div>
         </div>
       </header>
 

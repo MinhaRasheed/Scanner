@@ -5,9 +5,12 @@ const cors = require('cors');
 const { exec } = require('child_process');
 const os = require('os');
 
+const authRoutes = require('./auth');
+
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use('/api/auth', authRoutes);
 
 const server = http.createServer(app);
 const io = new Server(server, {

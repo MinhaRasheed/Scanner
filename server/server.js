@@ -60,10 +60,18 @@ function getMacVendor(ip) {
 
 function pingHost(ip) {
   return new Promise((resolve) => {
-    exec(`ping -c 1 -W 1 ${ip}`, { timeout: 3000 }, (err, stdout) => {
-      if (!err && stdout.includes('1 packets received')) {
-        // parse latency
-        const latencyMatch = stdout.match(/time=(\d+\.?\d*)/);
+    const isWindows = process.platform === 'win32';
+    const cmd = isWindows
+      ? `ping -n 1 -w 1000 ${ip}`
+      : `ping -c 1 -W 1 ${ip}`;
+    exec(cmd, { timeout: 3000 }, (err, stdout) => {
+      const alive = !err && (
+        stdout.includes('1 received') ||          // Linux
+        stdout.includes('1 packets received') ||   // macOS
+        stdout.includes('Received = 1')            // Windows
+      );
+      if (alive) {
+        const latencyMatch = stdout.match(/time[=<](\d+\.?\d*)/);
         resolve({ alive: true, latency: latencyMatch ? parseFloat(latencyMatch[1]) : null });
       } else {
         resolve({ alive: false, latency: null });
@@ -129,6 +137,10 @@ async function scanSubnet() {
   }
 
   await Promise.allSettled(scanPromises);
+
+  // If no real devices found at all, keep demo devices visible
+  const realDevices = Array.from(deviceRegistry.values()).filter(d => !d.isDemo);
+  if (realDevices.length === 0) seedDemoDevices();
 
   // Broadcast full device list
   const devices = Array.from(deviceRegistry.values());

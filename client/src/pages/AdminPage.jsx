@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../context/AuthContext'
 import './AdminPage.css'
 
-const API = 'http://localhost:3001/api/auth'
+const API = (import.meta.env.VITE_API_URL || 'http://localhost:3001') + '/api/auth'
 
 function authHeader() {
   return { Authorization: `Bearer ${localStorage.getItem('netscan_token')}`, 'Content-Type': 'application/json' }

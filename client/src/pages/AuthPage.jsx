@@ -8,7 +8,6 @@ export default function AuthPage() {
   const [form, setForm] = useState({ name: '', email: '', password: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [successPopup, setSuccessPopup] = useState(null) // { name, email }
 
   function handleChange(e) {
     setForm(f => ({ ...f, [e.target.name]: e.target.value }))
@@ -27,9 +26,7 @@ export default function AuthPage() {
     setError('')
     try {
       if (mode === 'register') {
-        const user = await register(form.name, form.email, form.password)
-        setSuccessPopup({ name: user.name, email: form.email })
-        setForm({ name: '', email: '', password: '' })
+        await register(form.name, form.email, form.password)
       } else if (mode === 'admin') {
         const user = await login(form.email, form.password, 'admin')
         if (user.role !== 'admin') {
@@ -62,33 +59,6 @@ export default function AuthPage() {
           <div key={i} className={`auth-node ${isAdmin ? 'auth-node-admin' : ''}`} style={{ '--i': i }} />
         ))}
       </div>
-
-      {/* Success Popup Overlay */}
-      {successPopup && (
-        <div className="success-overlay" onClick={() => { setSuccessPopup(null); switchMode('login') }}>
-          <div className="success-popup" onClick={e => e.stopPropagation()}>
-            <div className="success-icon-wrap">
-              <div className="success-icon-ring" />
-              <span className="success-icon">✓</span>
-            </div>
-            <h3 className="success-title">Account Created!</h3>
-            <p className="success-msg">
-              Welcome, <strong>{successPopup.name}</strong>!<br />
-              Your account has been successfully created.
-            </p>
-            <div className="success-email-badge">
-              ✉️ {successPopup.email}
-            </div>
-            <button
-              className="success-btn"
-              onClick={() => { setSuccessPopup(null); switchMode('login') }}
-            >
-              → Sign In to Your Account
-            </button>
-            <p className="success-hint">Click anywhere outside to dismiss</p>
-          </div>
-        </div>
-      )}
 
       <div className={`auth-card ${isAdmin ? 'auth-card-admin' : ''}`}>
         {/* Logo */}

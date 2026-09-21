@@ -14,8 +14,16 @@ export function AuthProvider({ children }) {
     if (!token) { setLoading(false); return }
     fetch(`${API}/me`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
-      .then(data => { if (data.user) setUser(data.user) })
-      .catch(() => {})
+      .then(data => {
+        if (data.user) {
+          setUser(data.user)
+        } else {
+          localStorage.removeItem('netscan_token')
+        }
+      })
+      .catch(() => {
+        localStorage.removeItem('netscan_token')
+      })
       .finally(() => setLoading(false))
   }, [])
 
@@ -23,7 +31,7 @@ export function AuthProvider({ children }) {
     const res = await fetch(`${API}/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
+      body: JSON.stringify({ email: email.trim().toLowerCase(), password })
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'Login failed')
@@ -37,11 +45,21 @@ export function AuthProvider({ children }) {
     const res = await fetch(`${API}/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password })
+      body: JSON.stringify({ name: name.trim(), email: email.trim().toLowerCase(), password })
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'Registration failed')
-    // Do NOT auto-login — let the user sign in manually
+    
+    // Auto-login upon successful registration
+    if (data.token && data.user) {
+      localStorage.setItem('netscan_token', data.token)
+      setUser(data.user)
+      if (data.user.role === 'admin') {
+        setLoginMode('admin')
+      } else {
+        setLoginMode('dashboard')
+      }
+    }
     return data.user
   }
 
@@ -52,7 +70,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, loginMode, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, loginMode, setLoginMode, login, register, logout }}>
       {children}
     </AuthContext.Provider>
   )

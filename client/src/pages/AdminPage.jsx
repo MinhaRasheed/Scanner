@@ -13,20 +13,33 @@ export default function AdminPage() {
   const [users, setUsers] = useState([])
   const [stats, setStats] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   const [toast, setToast] = useState(null)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
   const [search, setSearch] = useState('')
 
   const fetchData = useCallback(async () => {
-    const [usersRes, statsRes] = await Promise.all([
-      fetch(`${API}/users`, { headers: authHeader() }),
-      fetch(`${API}/stats`, { headers: authHeader() })
-    ])
-    const usersData = await usersRes.json()
-    const statsData = await statsRes.json()
-    setUsers(usersData.users || [])
-    setStats(statsData)
-    setLoading(false)
+    setLoading(true)
+    setError(null)
+    try {
+      const [usersRes, statsRes] = await Promise.all([
+        fetch(`${API}/users`, { headers: authHeader() }),
+        fetch(`${API}/stats`, { headers: authHeader() })
+      ])
+      const usersData = await usersRes.json()
+      const statsData = await statsRes.json()
+
+      if (!usersRes.ok) {
+        throw new Error(usersData.error || 'Failed to load registered users')
+      }
+
+      setUsers(usersData.users || [])
+      setStats(statsData)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -37,30 +50,38 @@ export default function AdminPage() {
   }
 
   async function handleRoleChange(userId, newRole) {
-    const res = await fetch(`${API}/users/${userId}/role`, {
-      method: 'PATCH',
-      headers: authHeader(),
-      body: JSON.stringify({ role: newRole })
-    })
-    const data = await res.json()
-    if (!res.ok) return showToast(data.error, 'error')
-    setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u))
-    setStats(prev => ({
-      ...prev,
-      admins: newRole === 'admin' ? prev.admins + 1 : prev.admins - 1,
-      users: newRole === 'user' ? prev.users + 1 : prev.users - 1
-    }))
-    showToast(`Role updated to ${newRole}`)
+    try {
+      const res = await fetch(`${API}/users/${userId}/role`, {
+        method: 'PATCH',
+        headers: authHeader(),
+        body: JSON.stringify({ role: newRole })
+      })
+      const data = await res.json()
+      if (!res.ok) return showToast(data.error, 'error')
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u))
+      setStats(prev => prev ? ({
+        ...prev,
+        admins: newRole === 'admin' ? prev.admins + 1 : prev.admins - 1,
+        users: newRole === 'user' ? prev.users + 1 : prev.users - 1
+      }) : null)
+      showToast(`Role updated to ${newRole}`)
+    } catch (err) {
+      showToast(err.message, 'error')
+    }
   }
 
   async function handleDelete(userId) {
-    const res = await fetch(`${API}/users/${userId}`, { method: 'DELETE', headers: authHeader() })
-    const data = await res.json()
-    if (!res.ok) return showToast(data.error, 'error')
-    setUsers(prev => prev.filter(u => u.id !== userId))
-    setStats(prev => ({ ...prev, total: prev.total - 1 }))
-    setDeleteConfirm(null)
-    showToast('User deleted')
+    try {
+      const res = await fetch(`${API}/users/${userId}`, { method: 'DELETE', headers: authHeader() })
+      const data = await res.json()
+      if (!res.ok) return showToast(data.error, 'error')
+      setUsers(prev => prev.filter(u => u.id !== userId))
+      setStats(prev => prev ? ({ ...prev, total: prev.total - 1 }) : null)
+      setDeleteConfirm(null)
+      showToast('User deleted')
+    } catch (err) {
+      showToast(err.message, 'error')
+    }
   }
 
   function formatDate(ts) {
@@ -80,12 +101,8 @@ export default function AdminPage() {
 
   const filtered = users.filter(u => {
     const q = search.toLowerCase()
-    return !q || u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
+    return !q || (u.name && u.name.toLowerCase().includes(q)) || (u.email && u.email.toLowerCase().includes(q))
   })
-
-  if (loading) return (
-    <div className="admin-loading"><span className="spin">⟳</span> Loading...</div>
-  )
 
   return (
     <div className="admin-page">
@@ -114,10 +131,29 @@ export default function AdminPage() {
       <div className="admin-header">
         <div>
           <h2 className="admin-title">Admin Panel</h2>
-          <p className="admin-sub">Manage users and system access</p>
+          <p className="admin-sub">Manage registered users and system access</p>
         </div>
-        <button className="admin-refresh" onClick={fetchData}>⟳ Refresh</button>
+        <button className="admin-refresh" onClick={fetchData} disabled={loading}>
+          <span className={loading ? 'spin' : ''}>⟳</span> Refresh
+        </button>
       </div>
+
+      {error && (
+        <div className="admin-error-banner" style={{
+          background: 'rgba(239, 68, 68, 0.15)',
+          border: '1px solid rgba(239, 68, 68, 0.3)',
+          color: '#fca5a5',
+          padding: '12px 16px',
+          borderRadius: '8px',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px'
+        }}>
+          <span>⚠️</span>
+          <span>{error}</span>
+        </div>
+      )}
 
       {/* Stats cards */}
       {stats && (
@@ -153,7 +189,7 @@ export default function AdminPage() {
       {/* Users table */}
       <div className="admin-table-wrap">
         <div className="admin-table-header">
-          <h3>Registered Users</h3>
+          <h3>Registered Users ({filtered.length})</h3>
           <div className="admin-search-wrap">
             <span>🔎</span>
             <input
@@ -166,75 +202,81 @@ export default function AdminPage() {
         </div>
 
         <div className="admin-table-scroll">
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>User</th>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Joined</th>
-                <th>Last Login</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr><td colSpan="7" className="table-empty">No users found</td></tr>
-              ) : filtered.map((u, i) => (
-                <tr key={u.id} className={u.id === user.id ? 'row-self' : ''}>
-                  <td className="td-id">{i + 1}</td>
-                  <td>
-                    <div className="user-cell">
-                      <div className="user-cell-avatar" style={{ background: u.role === 'admin' ? 'linear-gradient(135deg,#a855f7,#7c3aed)' : 'linear-gradient(135deg,#00d4ff,#0891b2)' }}>
-                        {u.name.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <div className="user-cell-name">
-                          {u.name}
-                          {u.id === user.id && <span className="you-badge">You</span>}
+          {loading && users.length === 0 ? (
+            <div className="admin-loading" style={{ padding: '40px', textAlign: 'center' }}>
+              <span className="spin">⟳</span> Loading user accounts...
+            </div>
+          ) : (
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>User</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Joined</th>
+                  <th>Last Login</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.length === 0 ? (
+                  <tr><td colSpan="7" className="table-empty">No users found</td></tr>
+                ) : filtered.map((u, i) => (
+                  <tr key={u.id} className={user && u.id === user.id ? 'row-self' : ''}>
+                    <td className="td-id">{i + 1}</td>
+                    <td>
+                      <div className="user-cell">
+                        <div className="user-cell-avatar" style={{ background: u.role === 'admin' ? 'linear-gradient(135deg,#a855f7,#7c3aed)' : 'linear-gradient(135deg,#00d4ff,#0891b2)' }}>
+                          {(u.name || 'U').charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <div className="user-cell-name">
+                            {u.name}
+                            {user && u.id === user.id && <span className="you-badge">You</span>}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </td>
-                  <td className="td-email">{u.email}</td>
-                  <td>
-                    <span className={`role-badge ${u.role === 'admin' ? 'role-admin' : 'role-user'}`}>
-                      {u.role === 'admin' ? '🛡️' : '👤'} {u.role}
-                    </span>
-                  </td>
-                  <td className="td-date">{formatDate(u.created_at)}</td>
-                  <td className="td-login">
-                    <span title={formatDate(u.last_login)}>{timeAgo(u.last_login)}</span>
-                  </td>
-                  <td>
-                    <div className="action-btns">
-                      {u.id !== user.id ? (
-                        <>
-                          <button
-                            className={`action-btn ${u.role === 'admin' ? 'btn-demote' : 'btn-promote'}`}
-                            onClick={() => handleRoleChange(u.id, u.role === 'admin' ? 'user' : 'admin')}
-                            title={u.role === 'admin' ? 'Demote to User' : 'Promote to Admin'}
-                          >
-                            {u.role === 'admin' ? '↓ User' : '↑ Admin'}
-                          </button>
-                          <button
-                            className="action-btn btn-delete"
-                            onClick={() => setDeleteConfirm(u)}
-                            title="Delete user"
-                          >
-                            🗑️
-                          </button>
-                        </>
-                      ) : (
-                        <span className="self-note">—</span>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    </td>
+                    <td className="td-email">{u.email}</td>
+                    <td>
+                      <span className={`role-badge ${u.role === 'admin' ? 'role-admin' : 'role-user'}`}>
+                        {u.role === 'admin' ? '🛡️' : '👤'} {u.role}
+                      </span>
+                    </td>
+                    <td className="td-date">{formatDate(u.created_at)}</td>
+                    <td className="td-login">
+                      <span title={formatDate(u.last_login)}>{timeAgo(u.last_login)}</span>
+                    </td>
+                    <td>
+                      <div className="action-btns">
+                        {user && u.id !== user.id ? (
+                          <>
+                            <button
+                              className={`action-btn ${u.role === 'admin' ? 'btn-demote' : 'btn-promote'}`}
+                              onClick={() => handleRoleChange(u.id, u.role === 'admin' ? 'user' : 'admin')}
+                              title={u.role === 'admin' ? 'Demote to User' : 'Promote to Admin'}
+                            >
+                              {u.role === 'admin' ? '↓ User' : '↑ Admin'}
+                            </button>
+                            <button
+                              className="action-btn btn-delete"
+                              onClick={() => setDeleteConfirm(u)}
+                              title="Delete user"
+                            >
+                              🗑️
+                            </button>
+                          </>
+                        ) : (
+                          <span className="self-note">—</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>

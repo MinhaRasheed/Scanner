@@ -144,11 +144,11 @@ def create_presentation(output_path):
     add_header(slide3, "How NetScan Pro Operates: 5 Core Steps", "SYSTEM WORKFLOW")
 
     steps = [
-        ("1. Subnet Auto-Detection", "Inspects host network interfaces to automatically detect local IP and calculate the subnet CIDR (e.g., 192.168.1.0/24)."),
-        ("2. Batched Ping Sweeps", "Executes concurrency-controlled ping sweeps across all 254 IP addresses every 10 seconds to discover alive hosts and measure latency."),
-        ("3. Hostname & MAC Lookup", "Queries reverse DNS, system host tables, and ARP caches to identify hardware vendors and device hostnames."),
-        ("4. Device Categorization", "Analyzes naming patterns and MAC signatures to classify devices into Laptops, Mobiles, TVs, Printers, and Routers."),
-        ("5. Live WebSocket Sync", "Pushes real-time state changes (connect, disconnect, reconnect) instantly to connected browser clients via Socket.io.")
+        ("1. Subnet & Interface Auto-Detection", "Inspects physical network adapters (Wi-Fi/Ethernet) to detect host IP and calculate the CIDR subnet (e.g., 192.168.1.0/24 or 172.20.160.0/19)."),
+        ("2. Batched Ping Sweeps & Concurrency", "Executes concurrency-controlled ping sweeps across all 254 IP addresses every 6 seconds to discover alive hosts and measure latency without freezing."),
+        ("3. ARP Inspection & Hardware OUI Resolution", "Extracts hardware MAC addresses from the ARP cache and matches OUI prefixes to identify manufacturers (Apple, Samsung, Intel, HP)."),
+        ("4. Targeted Unicast IP Probing (⚡ Probe IP)", "Allows administrators to enter custom IPs (e.g., 172.20.181.188) to probe and track cross-subnet nodes or silent clients on demand."),
+        ("5. SQLite Persistence & Live WebSocket Sync", "Logs every connection/disconnection event permanently in SQLite with timestamps and broadcasts live state updates via Socket.IO.")
     ]
 
     for i, (stitle, sdesc) in enumerate(steps):
@@ -179,12 +179,12 @@ def create_presentation(output_path):
     add_header(slide4, "Key Features & Capabilities", "FEATURE MATRIX")
 
     features = [
-        ("Real-Time Latency Badges", "Accurately measures and displays round-trip ping latency in milliseconds (ms) for every active device.", "⏱️"),
-        ("Instant Toast Alerts", "Pops up notifications in real time when a new device joins or an existing device drops off the network.", "🔔"),
-        ("Category & Search Filters", "Instantly filter devices by category (Laptop, Phone, TV, Printer) or search by IP, hostname, or MAC.", "🔍"),
-        ("On-Demand Manual Scan", "Allows users to trigger immediate network sweeps with a single click, bypassing the automatic timer.", "⚡"),
-        ("Live Connection Heartbeat", "Visual status indicators and pulse badges showing real-time WebSocket connection state.", "🟢"),
-        ("Hardware Classification", "Smart heuristics identify device types and present intuitive custom category icons.", "💻")
+        ("⚡ On-Demand Target Probing (Probe IP)", "Enter any specific IP to send direct ICMP/ARP probes and force-track custom or cross-subnet nodes.", "🎯"),
+        ("📜 Persistent DB History & CSV Export", "Full historical audit trail in SQLite recording every connect/disconnect event with 1-click CSV download.", "💾"),
+        ("🏷️ Hardware Vendor Identification", "Automatic MAC OUI dictionary matching identifies Apple, Samsung, OnePlus, Dell, HP, Xiaomi, and Google devices.", "🏷️"),
+        ("🔔 Real-Time Live Toast Alerts", "Instant green/red popups when devices connect or drop off without requiring page reloads.", "🔔"),
+        ("⏱️ Dynamic Live Uptime & Latency", "Displays active session uptime counters and sub-millisecond round-trip latency badges.", "⏱️"),
+        ("🛡️ Role-Based Access Control (RBAC)", "Secure dual-role system (Admin vs User) with bcrypt password hashing and user governance.", "🛡️")
     ]
 
     for i, (ftitle, fdesc, ficon) in enumerate(features):
@@ -368,10 +368,10 @@ def create_presentation(output_path):
     pc0.space_after = Pt(14)
 
     c_points = [
-        "Zero-Configuration Discovery: Runs automatically without complicated terminal setups or manual network configuring.",
-        "Modern Real-Time UI: Replaces outdated terminal tables with responsive cards, live latency charts, and category filters.",
-        "Enterprise-Grade Governance: Combines robust role-based authentication with instant live updates for team visibility.",
-        "Roadmap Opportunities: Easy to extend with Open Port Scanning (TCP/UDP), Vendor OUI database lookup, and CSV/PDF export."
+        "Zero-Configuration Discovery: Automatically sweeps local subnets and provides targeted unicast (⚡ Probe IP) for custom network nodes.",
+        "Hardware Brand Recognition: Resolves manufacturer details (Apple, Samsung, Intel, etc.) directly from hardware MAC OUI prefixes.",
+        "Auditable DB Persistence: Permanently stores all connection/disconnection logs in SQLite with 1-click CSV report exports.",
+        "Enterprise Governance & Live Alerts: Secure dual-role RBAC authentication combined with sub-second WebSocket toast notifications."
     ]
 
     for pt in c_points:

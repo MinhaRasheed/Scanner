@@ -25,6 +25,7 @@ const SCAN_INTERVAL = 6000; // Fast 6-second live scan cycle
 let isScanning = false;
 let selectedInterfaceName = null;
 let isInitialScan = true;
+const customTrackedIps = new Set();
 
 // SQLite prepared statement for device persistence
 const saveDeviceStmt = db.prepare(`
@@ -366,6 +367,7 @@ async function scanSubnet() {
     // 2. Build list of IPs to scan
     const ipsToScan = new Set();
     arpEntries.forEach(e => ipsToScan.add(e.ip));
+    customTrackedIps.forEach(ip => ipsToScan.add(ip));
     
     for (let i = 1; i <= 254; i++) {
       ipsToScan.add(`${subnet}.${i}`);
@@ -449,6 +451,7 @@ async function scanSubnet() {
 // Probe single IP directly on demand
 async function probeSingleIp(ip) {
   const cleanIp = ip.trim();
+  customTrackedIps.add(cleanIp);
   const now = Date.now();
   const { alive, latency } = await pingHost(cleanIp);
   const mac = await getMacFromArpTable(cleanIp);

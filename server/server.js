@@ -20,47 +20,129 @@ const io = new Server(server, {
 
 // Device state tracking
 const deviceRegistry = new Map(); // ip -> device info
-const SCAN_INTERVAL = 10000;
+const SCAN_INTERVAL = 6000; // Fast 6-second live scan cycle
 let isScanning = false;
+let selectedInterfaceName = null;
 
-function getLocalSubnet() {
+// Common MAC OUI vendor prefix dictionary for accurate real device identification
+const OUI_MAP = {
+  '50:EB:71': 'Intel / PC',
+  '50:EB:F6': 'Intel / PC',
+  'B0:83:FE': 'Apple (iPhone/Mac)',
+  '10:5A:95': 'Apple (iPhone/iPad)',
+  'C0:E4:34': 'Samsung Electronics',
+  'DE:10:2F': 'Samsung Galaxy',
+  'A8:41:F4': 'Xiaomi / Redmi',
+  '40:D1:33': 'OnePlus / Oppo',
+  'D0:39:57': 'Dell Computer',
+  'C0:BF:BE': 'HP Laptop/Printer',
+  '1C:1B:0D': 'Amazon Echo / FireTV',
+  'D8:80:83': 'TP-Link Device',
+  'DC:FE:07': 'Realtek Semiconductor',
+  '58:11:22': 'Apple Inc.',
+  '88:AE:DD': 'Apple Inc.',
+  'A0:AD:9F': 'Google Pixel / Nest',
+  '08:BF:B8': 'Sony Device',
+  '54:07:7D': 'LG Electronics',
+  'A0:36:BC': 'Intel Corporation',
+  '7C:5A:1C': 'Espressif IoT (ESP32)',
+  '94:18:65': 'Amazon Technologies',
+  'E8:65:38': 'Samsung Electronics',
+  'B8:1E:A4': 'Apple Inc.',
+  '10:7C:61': 'Huawei Technologies',
+  '44:A3:BB': 'Asus Computer',
+  '30:56:0F': 'Apple Inc.',
+  '8C:7A:B3': 'Samsung Electronics',
+  '2C:3B:70': 'Xiaomi Communications',
+  'F8:54:F6': 'Apple Inc.',
+  '24:B2:B9': 'Realtek Semiconductor',
+  '58:41:46': 'OnePlus Device',
+  '10:B2:32': 'Apple Inc.',
+  '3C:33:32': 'Intel Corporation',
+  '5C:3A:45': 'Google Pixel / Nest',
+  '5C:5F:67': 'Samsung Electronics',
+  'C0:35:32': 'Lenovo Laptop',
+  'B4:AD:A3': 'Apple Inc.',
+  'C8:94:02': 'HP Inc.',
+  'BC:FC:E7': 'Apple Inc.',
+  '14:AC:60': 'Apple Inc.',
+  'B8:F7:75': 'Dell Computer',
+  '48:9E:9D': 'Samsung Electronics',
+  'B8:82:F2': 'Xiaomi Communications',
+  '52:F2:2E': 'Amazon Device',
+  '10:FF:E0': 'Apple Inc.',
+  '50:BB:B5': 'TP-Link Technologies',
+  '1C:2F:A2': 'Google LLC'
+};
+
+function getNetworkInterfacesList() {
   const interfaces = os.networkInterfaces();
+  const list = [];
+  
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name]) {
       if (iface.family === 'IPv4' && !iface.internal) {
         const parts = iface.address.split('.');
-        return `${parts[0]}.${parts[1]}.${parts[2]}`;
+        const subnet = `${parts[0]}.${parts[1]}.${parts[2]}`;
+        const isVirtual = /virtual|vbox|vmware|vethernet|loopback/i.test(name) || /192\.168\.56\./.test(iface.address);
+        const isWifi = /wi-?fi|wlan|wireless/i.test(name);
+        
+        list.push({
+          name,
+          address: iface.address,
+          netmask: iface.netmask,
+          mac: iface.mac,
+          subnet,
+          isVirtual,
+          isWifi,
+          priority: isWifi ? 10 : isVirtual ? 1 : 5
+        });
       }
     }
   }
-  return '192.168.1';
+  
+  // Sort: Wi-Fi first, then physical Ethernet, virtual last
+  return list.sort((a, b) => b.priority - a.priority);
+}
+
+function getActiveInterface() {
+  const list = getNetworkInterfacesList();
+  if (selectedInterfaceName) {
+    const found = list.find(i => i.name === selectedInterfaceName);
+    if (found) return found;
+  }
+  return list[0] || { name: 'WiFi', address: '127.0.0.1', subnet: '192.168.1' };
+}
+
+function getLocalSubnet() {
+  return getActiveInterface().subnet;
 }
 
 function getLocalIp() {
-  const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
-    }
-  }
-  return '127.0.0.1';
+  return getActiveInterface().address;
+}
+
+function lookupVendor(mac) {
+  if (!mac || mac === 'Unknown') return null;
+  const clean = mac.replace(/[:-]/g, ':').toUpperCase();
+  const prefix = clean.substring(0, 8);
+  return OUI_MAP[prefix] || null;
 }
 
 async function getHostname(ip) {
-  // Try fast DNS reverse lookup first (no child process)
   try {
     const hostnames = await dns.promises.reverse(ip);
     if (hostnames && hostnames.length > 0) {
-      return hostnames[0];
+      return hostnames[0].replace(/\.local|\.lan|\.home/gi, '');
     }
   } catch {
-    // DNS reverse failed, fallback to system command
+    // DNS reverse failed
   }
 
   return new Promise((resolve) => {
     const isWindows = process.platform === 'win32';
     const cmd = isWindows ? `nslookup ${ip}` : `host ${ip}`;
-    exec(cmd, { timeout: 1500 }, (err, stdout) => {
+    exec(cmd, { timeout: 1200 }, (err, stdout) => {
       if (!err && stdout) {
         if (isWindows) {
           const match = stdout.match(/Name:\s+([^\r\n]+)/i);
@@ -75,16 +157,47 @@ async function getHostname(ip) {
   });
 }
 
-function getMacVendor(ip) {
+function getMacFromArpTable(ip) {
   return new Promise((resolve) => {
     const isWindows = process.platform === 'win32';
-    const cmd = isWindows ? `arp -a ${ip}` : `arp ${ip}`;
-    exec(cmd, { timeout: 1500 }, (err, stdout) => {
+    const cmd = isWindows ? `arp -a ${ip}` : `arp -n ${ip}`;
+    exec(cmd, { timeout: 1000 }, (err, stdout) => {
       if (!err && stdout) {
         const macMatch = stdout.match(/([0-9a-f]{1,2}[:-]){5}[0-9a-f]{1,2}/i);
-        if (macMatch) return resolve(macMatch[0].toUpperCase());
+        if (macMatch) return resolve(macMatch[0].replace(/-/g, ':').toUpperCase());
       }
       resolve('Unknown');
+    });
+  });
+}
+
+function getArpTableEntries(targetInterfaceIp) {
+  return new Promise((resolve) => {
+    exec('arp -a', { timeout: 2000 }, (err, stdout) => {
+      if (err || !stdout) return resolve([]);
+      const lines = stdout.split(/\r?\n/);
+      const entries = [];
+      let inCurrentInterface = false;
+
+      for (const line of lines) {
+        if (line.includes('Interface:')) {
+          inCurrentInterface = targetInterfaceIp ? line.includes(targetInterfaceIp) : true;
+          continue;
+        }
+        if (inCurrentInterface || !targetInterfaceIp) {
+          const match = line.trim().match(/^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3})\s+([0-9a-f]{1,2}[:-][0-9a-f]{1,2}[:-][0-9a-f]{1,2}[:-][0-9a-f]{1,2}[:-][0-9a-f]{1,2}[:-][0-9a-f]{1,2})\s+(\w+)/i);
+          if (match) {
+            const ip = match[1];
+            const mac = match[2].replace(/-/g, ':').toUpperCase();
+            const type = match[3];
+            // Filter out multicast and broadcast IPs
+            if (!ip.startsWith('224.') && !ip.startsWith('239.') && !ip.endsWith('.255') && !mac.startsWith('FF:FF:FF') && !mac.startsWith('01:00:5E')) {
+              entries.push({ ip, mac, type });
+            }
+          }
+        }
+      }
+      resolve(entries);
     });
   });
 }
@@ -93,15 +206,14 @@ function pingHost(ip) {
   return new Promise((resolve) => {
     const isWindows = process.platform === 'win32';
     const cmd = isWindows
-      ? `ping -n 1 -w 500 ${ip}`
+      ? `ping -n 1 -w 400 ${ip}`
       : `ping -c 1 -W 1 ${ip}`;
-    exec(cmd, { timeout: 1500 }, (err, stdout) => {
+    exec(cmd, { timeout: 1000 }, (err, stdout) => {
       const alive = !err && (
-        stdout.includes('1 received') ||          // Linux
-        stdout.includes('1 packets received') ||   // macOS
-        stdout.includes('Received = 1') ||         // Windows English
-        stdout.includes('bytes=') ||               // Windows general reply
-        stdout.includes('TTL=')
+        stdout.includes('1 received') ||
+        stdout.includes('1 packets received') ||
+        stdout.includes('Received = 1') ||
+        (stdout.includes('bytes=') && !stdout.includes('Destination host unreachable'))
       );
       if (alive) {
         const latencyMatch = stdout.match(/time[=<](\d+\.?\d*)\s*ms/i) || stdout.match(/time[=<](\d+\.?\d*)/i);
@@ -113,20 +225,21 @@ function pingHost(ip) {
   });
 }
 
-function guessDeviceType(hostname, mac) {
+function guessDeviceType(hostname, mac, vendor) {
   const h = (hostname || '').toLowerCase();
   const m = (mac || '').toLowerCase();
-  if (h.includes('iphone') || h.includes('ipad') || h.includes('galaxy') || h.includes('pixel')) return 'mobile';
-  if (h.includes('android')) return 'mobile';
-  if (h.includes('router') || h.includes('gateway') || h.includes('ap') || h.includes('modem')) return 'router';
-  if (h.includes('printer') || h.includes('print') || h.includes('canon') || h.includes('epson')) return 'printer';
-  if (h.includes('tv') || h.includes('samsung') || h.includes('apple-tv') || h.includes('roku') || h.includes('firetv')) return 'tv';
-  if (h.includes('macbook') || h.includes('mac') || h.includes('windows') || h.includes('pc') || h.includes('laptop') || h.includes('desktop')) return 'laptop';
+  const v = (vendor || '').toLowerCase();
+  
+  if (h.includes('iphone') || h.includes('ipad') || h.includes('galaxy') || h.includes('pixel') || v.includes('oneplus') || v.includes('xiaomi') || v.includes('oppo')) return 'mobile';
+  if (h.includes('android') || v.includes('mobile')) return 'mobile';
+  if (h.includes('router') || h.includes('gateway') || h.includes('ap') || h.includes('modem') || v.includes('tp-link') || v.includes('cisco')) return 'router';
+  if (h.includes('printer') || h.includes('print') || h.includes('canon') || h.includes('epson') || v.includes('hp')) return 'printer';
+  if (h.includes('tv') || h.includes('samsung') || h.includes('apple-tv') || h.includes('roku') || h.includes('firetv') || v.includes('sony') || v.includes('lg')) return 'tv';
+  if (h.includes('macbook') || h.includes('mac') || h.includes('windows') || h.includes('pc') || h.includes('laptop') || h.includes('desktop') || v.includes('dell') || v.includes('lenovo') || v.includes('asus') || v.includes('intel')) return 'laptop';
   return 'unknown';
 }
 
-// Helper to run promises with controlled concurrency
-async function runWithConcurrency(items, fn, limit = 16) {
+async function runWithConcurrency(items, fn, limit = 20) {
   const results = [];
   const executing = [];
   for (const item of items) {
@@ -143,58 +256,102 @@ async function runWithConcurrency(items, fn, limit = 16) {
   return Promise.allSettled(results);
 }
 
+// Live Real-Time Network Scanner Engine
 async function scanSubnet() {
   if (isScanning) return;
   isScanning = true;
   try {
-    const subnet = getLocalSubnet();
+    const activeIface = getActiveInterface();
+    const subnet = activeIface.subnet;
+    const localIp = activeIface.address;
     const now = Date.now();
-    const ips = [];
-    for (let i = 1; i <= 254; i++) {
-      ips.push(`${subnet}.${i}`);
+
+    // 1. Immediately read ARP table neighbors
+    const arpEntries = await getArpTableEntries(localIp);
+    const arpMap = new Map();
+    arpEntries.forEach(e => arpMap.set(e.ip, e.mac));
+
+    // Register host machine itself as live online
+    if (!deviceRegistry.has(localIp)) {
+      deviceRegistry.set(localIp, {
+        ip: localIp,
+        hostname: `${os.hostname()} (This Device)`,
+        mac: activeIface.mac ? activeIface.mac.toUpperCase() : 'Local Host',
+        status: 'online',
+        connectedAt: now,
+        disconnectedAt: null,
+        latency: 0.2,
+        deviceType: 'laptop',
+        vendor: 'Local Host Controller',
+        lastSeen: now
+      });
+      io.emit('device_update', { type: 'new', device: deviceRegistry.get(localIp) });
+    } else {
+      const selfDev = deviceRegistry.get(localIp);
+      selfDev.status = 'online';
+      selfDev.lastSeen = now;
+      selfDev.latency = 0.2;
     }
 
-    await runWithConcurrency(ips, async (ip) => {
+    // 2. Build list of IPs to scan (ARP neighbors + entire local subnet)
+    const ipsToScan = new Set();
+    arpEntries.forEach(e => ipsToScan.add(e.ip));
+    
+    for (let i = 1; i <= 254; i++) {
+      ipsToScan.add(`${subnet}.${i}`);
+    }
+
+    // 3. Concurrently probe hosts
+    await runWithConcurrency(Array.from(ipsToScan), async (ip) => {
+      if (ip === localIp) return; // already handled
+      
       const { alive, latency } = await pingHost(ip);
       const existing = deviceRegistry.get(ip);
-      if (alive) {
+      const isArpCached = arpMap.has(ip);
+
+      if (alive || isArpCached) {
+        const mac = arpMap.get(ip) || (existing ? existing.mac : await getMacFromArpTable(ip));
+        const vendor = lookupVendor(mac);
+
         if (!existing || existing.status === 'offline') {
-          // New device or reconnected
-          const [hostname, mac] = await Promise.all([getHostname(ip), getMacVendor(ip)]);
-          const deviceType = guessDeviceType(hostname, mac);
+          // Newly discovered or reconnected device
+          const hostname = await getHostname(ip);
+          const deviceType = guessDeviceType(hostname, mac, vendor);
+          
           const device = {
             ip,
-            hostname: hostname || (existing ? existing.hostname : `Device-${ip.split('.').pop()}`),
-            mac: mac !== 'Unknown' ? mac : (existing ? existing.mac : 'Unknown'),
+            hostname: hostname || (vendor ? `${vendor.split(' ')[0]}-${ip.split('.').pop()}` : `Device-${ip.split('.').pop()}`),
+            mac: mac || 'Unknown',
             status: 'online',
             connectedAt: now,
             disconnectedAt: null,
             lastDisconnectedAt: existing ? existing.disconnectedAt : null,
-            latency,
+            latency: latency || 1.5,
             deviceType,
+            vendor: vendor || 'Unknown Vendor',
             lastSeen: now
           };
           deviceRegistry.set(ip, device);
           io.emit('device_update', { type: existing ? 'reconnected' : 'new', device });
         } else {
-          // Update latency and lastSeen
-          existing.latency = latency;
+          // Device active - update latency & heartbeat
+          existing.status = 'online';
+          existing.latency = latency || existing.latency;
           existing.lastSeen = now;
+          if (mac && mac !== 'Unknown') existing.mac = mac;
+          if (vendor) existing.vendor = vendor;
           deviceRegistry.set(ip, existing);
         }
       } else if (existing && existing.status === 'online') {
+        // Device stopped responding
         existing.status = 'offline';
         existing.disconnectedAt = now;
         deviceRegistry.set(ip, existing);
         io.emit('device_update', { type: 'disconnected', device: existing });
       }
-    }, 16);
+    }, 20);
 
-    // If no real devices found at all, keep demo devices visible
-    const realDevices = Array.from(deviceRegistry.values()).filter(d => !d.isDemo);
-    if (realDevices.length === 0) seedDemoDevices();
-
-    // Broadcast full device list
+    // Broadcast full live list to all clients
     const devices = Array.from(deviceRegistry.values());
     io.emit('device_list', devices);
   } catch (err) {
@@ -210,52 +367,61 @@ app.get('/api/devices', (req, res) => {
 });
 
 app.get('/api/subnet', (req, res) => {
-  res.json({ subnet: getLocalSubnet(), localIp: getLocalIp() });
+  const activeIface = getActiveInterface();
+  res.json({
+    subnet: activeIface.subnet,
+    localIp: activeIface.address,
+    interfaceName: activeIface.name,
+    allInterfaces: getNetworkInterfacesList()
+  });
+});
+
+app.get('/api/interfaces', (req, res) => {
+  res.json({
+    active: getActiveInterface(),
+    available: getNetworkInterfacesList()
+  });
+});
+
+app.post('/api/interfaces/select', (req, res) => {
+  const { name } = req.body;
+  if (!name) return res.status(400).json({ error: 'Interface name required' });
+  selectedInterfaceName = name;
+  deviceRegistry.clear(); // reset devices for new network
+  scanSubnet();
+  res.json({ success: true, active: getActiveInterface() });
+});
+
+app.post('/api/devices/clear', (req, res) => {
+  deviceRegistry.clear();
+  scanSubnet();
+  res.json({ success: true });
 });
 
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
-  // Send current device list on connect
   socket.emit('device_list', Array.from(deviceRegistry.values()));
+  socket.emit('interface_info', {
+    active: getActiveInterface(),
+    available: getNetworkInterfacesList()
+  });
   socket.on('disconnect', () => console.log('Client disconnected:', socket.id));
-  socket.on('manual_scan', () => {
+  socket.on('manual_scan', () => scanSubnet());
+  socket.on('select_interface', (name) => {
+    selectedInterfaceName = name;
+    deviceRegistry.clear();
     scanSubnet();
   });
 });
 
-function seedDemoDevices() {
-  const subnet = getLocalSubnet();
-  const now = Date.now();
-  const demos = [
-    { ip: `${subnet}.5`,  hostname: 'MacBook-Pro',   mac: 'DE:AD:BE:EF:00:01', deviceType: 'laptop',  latency: 3.5,  status: 'online'  },
-    { ip: `${subnet}.10`, hostname: 'iPhone-15',      mac: 'DE:AD:BE:EF:00:02', deviceType: 'mobile',  latency: 5.1,  status: 'online'  },
-    { ip: `${subnet}.15`, hostname: 'Samsung-SmartTV',mac: 'DE:AD:BE:EF:00:03', deviceType: 'tv',      latency: 8.7,  status: 'online'  },
-    { ip: `${subnet}.20`, hostname: 'HP-LaserJet',    mac: 'DE:AD:BE:EF:00:04', deviceType: 'printer', latency: null, status: 'offline' },
-    { ip: `${subnet}.25`, hostname: 'iPad-Air',       mac: 'DE:AD:BE:EF:00:05', deviceType: 'mobile',  latency: 4.2,  status: 'offline' },
-  ];
-  demos.forEach((d) => {
-    if (deviceRegistry.has(d.ip)) return; // don't overwrite real device
-    const connectedAt = now - Math.floor(Math.random() * 3600000);
-    deviceRegistry.set(d.ip, {
-      ...d,
-      isDemo: true,
-      connectedAt,
-      disconnectedAt: d.status === 'offline' ? now - Math.floor(Math.random() * 1800000) : null,
-      lastSeen: d.status === 'offline' ? now - Math.floor(Math.random() * 1800000) : now,
-    });
-  });
-}
-
-// Recursive scan loop to prevent overlapping runs
 async function scanLoop() {
   await scanSubnet();
   setTimeout(scanLoop, SCAN_INTERVAL);
 }
 
-// Start scanning
 async function startScanning() {
-  console.log(`Scanning subnet: ${getLocalSubnet()}.0/24`);
-  seedDemoDevices();
+  const iface = getActiveInterface();
+  console.log(`Starting real network scanner on interface: ${iface.name} (${iface.address}, Subnet: ${iface.subnet}.0/24)`);
   scanLoop();
 }
 

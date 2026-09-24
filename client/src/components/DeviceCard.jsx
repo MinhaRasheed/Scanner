@@ -82,7 +82,9 @@ export default function DeviceCard({ device }) {
         <div className="card-info">
           <div className="device-hostname">
             {device.hostname}
-            {device.isDemo && <span className="demo-badge">Demo</span>}
+            {device.vendor && device.vendor !== 'Unknown Vendor' && (
+              <span className="vendor-badge">{device.vendor}</span>
+            )}
           </div>
           <div className="device-ip">{device.ip}</div>
         </div>
@@ -143,20 +145,24 @@ export default function DeviceCard({ device }) {
           <div className="expanded-divider" />
           <div className="detail-grid">
             <div className="detail-item">
-              <span className="detail-label">MAC Address</span>
+              <span className="detail-label">Hardware MAC</span>
               <span className="detail-value mono">{device.mac || '—'}</span>
             </div>
             <div className="detail-item">
-              <span className="detail-label">Device Type</span>
-              <span className="detail-value capitalize">{device.deviceType || 'Unknown'}</span>
+              <span className="detail-label">Vendor / Hardware</span>
+              <span className="detail-value">{device.vendor || 'Unknown'}</span>
             </div>
             <div className="detail-item">
-              <span className="detail-label">Last Seen</span>
-              <span className="detail-value">{formatTime(device.lastSeen)}</span>
+              <span className="detail-label">Category</span>
+              <span className="detail-value capitalize">{device.deviceType || 'Unknown'}</span>
             </div>
             <div className="detail-item">
               <span className="detail-label">Latency</span>
               <span className="detail-value">{device.latency != null ? `${device.latency.toFixed(1)} ms` : '—'}</span>
+            </div>
+            <div className="detail-item">
+              <span className="detail-label">Last Seen</span>
+              <span className="detail-value">{formatTime(device.lastSeen)}</span>
             </div>
             {isOnline && device.lastDisconnectedAt && (
               <div className="detail-item">

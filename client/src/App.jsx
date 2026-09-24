@@ -34,6 +34,8 @@ function Dashboard({ user, logout, page, setPage }) {
   const [scanning, setScanning] = useState(false)
   const [connected, setConnected] = useState(false)
   const [subnet, setSubnet] = useState('')
+  const [ifaceName, setIfaceName] = useState('')
+  const [allInterfaces, setAllInterfaces] = useState([])
   const [lastScan, setLastScan] = useState(null)
   const [notifications, setNotifications] = useState([])
   const socketRef = useRef(null)
@@ -45,6 +47,15 @@ function Dashboard({ user, logout, page, setPage }) {
     socket.on('connect', () => setConnected(true))
     socket.on('disconnect', () => setConnected(false))
     socket.on('device_list', (list) => { setDevices(list); setScanning(false); setLastScan(Date.now()) })
+    socket.on('interface_info', (data) => {
+      if (data.active) {
+        setSubnet(data.active.subnet)
+        setIfaceName(data.active.name)
+      }
+      if (data.available) {
+        setAllInterfaces(data.available)
+      }
+    })
     socket.on('device_update', ({ type, device }) => {
       setDevices(prev => {
         const idx = prev.findIndex(d => d.ip === device.ip)
@@ -53,23 +64,49 @@ function Dashboard({ user, logout, page, setPage }) {
       })
       addNotification(type, device)
     })
-    fetch(`${SOCKET_URL}/api/subnet`).then(r => r.json()).then(d => setSubnet(d.subnet)).catch(() => {})
+
+    fetch(`${SOCKET_URL}/api/subnet`)
+      .then(r => r.json())
+      .then(d => {
+        setSubnet(d.subnet)
+        setIfaceName(d.interfaceName || 'WiFi')
+        if (d.allInterfaces) setAllInterfaces(d.allInterfaces)
+      })
+      .catch(() => {})
+
     return () => socket.disconnect()
   }, [])
 
   function addNotification(type, device) {
     const id = ++notifId.current
-    const msg = type === 'new' ? `New device: ${device.hostname}` : type === 'reconnected' ? `Reconnected: ${device.hostname}` : `Disconnected: ${device.hostname}`
+    const devName = device.hostname || device.ip
+    const msg = type === 'new'
+      ? `🟢 Device connected: ${devName}`
+      : type === 'reconnected'
+      ? `🔄 Reconnected: ${devName}`
+      : `🔴 Disconnected: ${devName}`
     const color = type === 'disconnected' ? '#ef4444' : '#22c55e'
-    setNotifications(prev => [...prev, { id, msg, color }])
-    setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 4000)
+    setNotifications(prev => [ { id, msg, color }, ...prev.slice(0, 4) ])
+    setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 5000)
   }
 
-  function triggerScan() { setScanning(true); socketRef.current?.emit('manual_scan') }
+  function triggerScan() {
+    setScanning(true)
+    socketRef.current?.emit('manual_scan')
+  }
+
+  function handleInterfaceChange(name) {
+    setIfaceName(name)
+    setScanning(true)
+    socketRef.current?.emit('select_interface', name)
+  }
 
   const filtered = devices
     .filter(d => filter === 'all' || d.status === filter)
-    .filter(d => { const q = search.toLowerCase(); return !q || d.ip.includes(q) || d.hostname?.toLowerCase().includes(q) || d.mac?.toLowerCase().includes(q) })
+    .filter(d => {
+      const q = search.toLowerCase()
+      return !q || d.ip.includes(q) || d.hostname?.toLowerCase().includes(q) || d.mac?.toLowerCase().includes(q) || d.vendor?.toLowerCase().includes(q)
+    })
     .sort((a, b) => {
       if (a.status === 'online' && b.status !== 'online') return -1
       if (b.status === 'online' && a.status !== 'online') return 1
@@ -108,14 +145,14 @@ function Dashboard({ user, logout, page, setPage }) {
             </div>
             <div>
               <h1 className="logo-title">NetScan Pro</h1>
-              <p className="logo-sub">Network Device Scanner</p>
+              <p className="logo-sub">Live Network Device Monitor</p>
             </div>
           </div>
 
           {/* Nav tabs */}
           <nav className="nav-tabs">
             <button className={`nav-tab ${page === 'dashboard' ? 'nav-tab-active' : ''}`} onClick={() => setPage('dashboard')}>
-              🌐 Dashboard
+              🌐 Live Dashboard
             </button>
             {user.role === 'admin' && (
               <button className={`nav-tab ${page === 'admin' ? 'nav-tab-active' : ''}`} onClick={() => setPage('admin')}>
@@ -130,7 +167,25 @@ function Dashboard({ user, logout, page, setPage }) {
             <span className={`pulse-dot ${connected ? 'pulse-green' : 'pulse-red'}`} />
             {connected ? 'Live' : 'Offline'}
           </div>
-          {subnet && <div className="subnet-badge">{subnet}.0/24</div>}
+
+          {/* Network Interface selector */}
+          {allInterfaces.length > 1 ? (
+            <select
+              value={ifaceName}
+              onChange={e => handleInterfaceChange(e.target.value)}
+              className="interface-select"
+              title="Select network interface"
+            >
+              {allInterfaces.map(i => (
+                <option key={i.name} value={i.name}>
+                  {i.name} ({i.address})
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="subnet-badge">{ifaceName || 'WiFi'} ({subnet}.0/24)</div>
+          )}
+
           {lastScan && <div className="last-scan-time">{new Date(lastScan).toLocaleTimeString()}</div>}
           {page === 'dashboard' && (
             <button className={`scan-btn ${scanning ? 'scan-btn-active' : ''}`} onClick={triggerScan} disabled={scanning}>
@@ -140,7 +195,7 @@ function Dashboard({ user, logout, page, setPage }) {
           )}
           <div className="user-menu">
             <div className="user-avatar" style={{ background: user.role === 'admin' ? 'linear-gradient(135deg,#a855f7,#7c3aed)' : undefined }}>
-              {user.name.charAt(0).toUpperCase()}
+              {(user.name || 'U').charAt(0).toUpperCase()}
             </div>
             <div className="user-info">
               <div className="user-name">{user.name}</div>
@@ -163,7 +218,7 @@ function Dashboard({ user, logout, page, setPage }) {
               <div className="empty-state">
                 <div className="empty-icon">{scanning ? '📡' : devices.length === 0 ? '🔍' : '🔎'}</div>
                 <p className="empty-text">
-                  {scanning ? 'Scanning your network...' : devices.length === 0 ? 'No devices found yet. Click Scan Now to begin.' : 'No devices match your filter.'}
+                  {scanning ? 'Scanning active Wi-Fi network...' : devices.length === 0 ? 'Searching for live devices on this network...' : 'No devices match your filter.'}
                 </p>
               </div>
             ) : (

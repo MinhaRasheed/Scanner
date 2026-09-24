@@ -66,6 +66,16 @@ function Dashboard({ user, logout, page, setPage }) {
       addNotification(type, device)
     })
 
+    fetch(`${SOCKET_URL}/api/devices`)
+      .then(r => r.json())
+      .then(list => {
+        if (Array.isArray(list)) {
+          setDevices(list)
+          setLastScan(Date.now())
+        }
+      })
+      .catch(() => {})
+
     fetch(`${SOCKET_URL}/api/subnet`)
       .then(r => r.json())
       .then(d => {
@@ -77,6 +87,19 @@ function Dashboard({ user, logout, page, setPage }) {
 
     return () => socket.disconnect()
   }, [])
+
+  function handleDeviceProbed(probedDevice) {
+    if (!probedDevice) return
+    setDevices(prev => {
+      const idx = prev.findIndex(d => d.ip === probedDevice.ip)
+      if (idx >= 0) {
+        const u = [...prev]
+        u[idx] = probedDevice
+        return u
+      }
+      return [probedDevice, ...prev]
+    })
+  }
 
   function addNotification(type, device) {
     const id = ++notifId.current
@@ -222,7 +245,14 @@ function Dashboard({ user, logout, page, setPage }) {
           <HistoryPage />
         ) : (
           <>
-            <StatsBar online={online} offline={offline} total={devices.length} scanning={scanning} />
+            <StatsBar
+              online={online}
+              offline={offline}
+              total={devices.length}
+              scanning={scanning}
+              filter={filter}
+              setFilter={setFilter}
+            />
             {scanning && <ScanAnimation subnet={subnet} />}
             <FilterBar
               filter={filter}
@@ -230,19 +260,31 @@ function Dashboard({ user, logout, page, setPage }) {
               search={search}
               setSearch={setSearch}
               totalResults={filtered.length}
+              onDeviceProbed={handleDeviceProbed}
+              counts={{ all: devices.length, online, offline }}
             />
             {filtered.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-icon">{scanning ? '📡' : devices.length === 0 ? '🔍' : '🔎'}</div>
                 <p className="empty-text">
                   {search
-                    ? `No devices matching "${search}". Try searching for an IP or vendor name.`
+                    ? `No devices matching "${search}" in ${filter === 'all' ? 'any category' : filter + ' devices'}.`
                     : scanning
                     ? 'Scanning active Wi-Fi network...'
                     : devices.length === 0
                     ? 'Searching for live devices on this network...'
-                    : 'No devices match your filter.'}
+                    : `No ${filter} devices found.`}
                 </p>
+                {search && (
+                  <button className="search-reset-btn" style={{ marginTop: '12px', padding: '6px 16px', fontSize: '13px' }} onClick={() => setSearch('')}>
+                    Clear Search
+                  </button>
+                )}
+                {filter !== 'all' && (
+                  <button className="search-reset-btn" style={{ marginTop: '12px', marginLeft: '8px', padding: '6px 16px', fontSize: '13px', background: 'rgba(0,212,255,0.15)', borderColor: 'rgba(0,212,255,0.3)', color: '#38bdf8' }} onClick={() => setFilter('all')}>
+                    View All Devices ({devices.length})
+                  </button>
+                )}
               </div>
             ) : (
               <div className="device-grid">

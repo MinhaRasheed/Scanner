@@ -5,4 +5,5 @@ dist/
 client/dist/
 .env
 *.log
+*.db-journal
 .DS_Store

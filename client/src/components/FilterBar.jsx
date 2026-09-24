@@ -3,15 +3,15 @@ import './FilterBar.css'
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3001'
 
-export default function FilterBar({ filter, setFilter, search, setSearch, totalResults }) {
+export default function FilterBar({ filter, setFilter, search, setSearch, totalResults, onDeviceProbed, counts }) {
   const [probing, setProbing] = useState(false)
   const [probeStatus, setProbeStatus] = useState(null)
   const isIpQuery = /^(\d{1,3}\.){3}\d{1,3}$/.test(search.trim())
 
   const categories = [
-    { id: 'all', label: 'All Devices', icon: '🌐' },
-    { id: 'online', label: 'Online', icon: '🟢' },
-    { id: 'offline', label: 'Offline', icon: '⚪' },
+    { id: 'all', label: 'All Devices', icon: '🌐', count: counts?.all },
+    { id: 'online', label: 'Online', icon: '🟢', count: counts?.online },
+    { id: 'offline', label: 'Offline', icon: '⚪', count: counts?.offline },
   ]
 
   async function handleProbeIp(targetIp) {
@@ -27,6 +27,7 @@ export default function FilterBar({ filter, setFilter, search, setSearch, totalR
       })
       const data = await res.json()
       if (data.device) {
+        if (onDeviceProbed) onDeviceProbed(data.device)
         setProbeStatus({
           type: 'success',
           message: `Target ${ipToProbe} registered! Status: ${data.device.status.toUpperCase()} (${data.device.vendor || 'Unknown Vendor'})`
@@ -58,7 +59,8 @@ export default function FilterBar({ filter, setFilter, search, setSearch, totalR
             onClick={() => setFilter(c.id)}
           >
             <span className="tab-icon">{c.icon}</span>
-            {c.label}
+            <span>{c.label}</span>
+            {c.count != null && <span className="tab-badge">{c.count}</span>}
           </button>
         ))}
       </div>
@@ -73,7 +75,7 @@ export default function FilterBar({ filter, setFilter, search, setSearch, totalR
           onChange={e => setSearch(e.target.value)}
           onKeyDown={handleKeyDown}
         />
-        {search && !isIpQuery && (
+        {search && (
           <button className="search-clear" onClick={() => setSearch('')} title="Clear search">✕</button>
         )}
         <button
@@ -95,7 +97,8 @@ export default function FilterBar({ filter, setFilter, search, setSearch, totalR
 
       {search && (
         <div className="search-indicator">
-          Found <strong>{totalResults}</strong> {totalResults === 1 ? 'device' : 'devices'} matching "{search}"
+          <span>Found <strong>{totalResults}</strong> {totalResults === 1 ? 'device' : 'devices'} matching "{search}"</span>
+          <button className="search-reset-btn" onClick={() => setSearch('')}>Clear Search</button>
           {isIpQuery && totalResults === 0 && (
             <span className="probe-hint">
               {' — '}Press <strong>Enter</strong> or click <strong>⚡ Probe IP</strong> to target and register this device!

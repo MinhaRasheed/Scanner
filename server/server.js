@@ -368,6 +368,7 @@ async function scanSubnet() {
     const ipsToScan = new Set();
     arpEntries.forEach(e => ipsToScan.add(e.ip));
     customTrackedIps.forEach(ip => ipsToScan.add(ip));
+    deviceRegistry.forEach((dev, ip) => ipsToScan.add(ip));
     
     for (let i = 1; i <= 254; i++) {
       ipsToScan.add(`${subnet}.${i}`);

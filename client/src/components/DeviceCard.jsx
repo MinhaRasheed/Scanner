@@ -66,7 +66,7 @@ function formatDuration(start, end) {
   return `${s}s`
 }
 
-export default function DeviceCard({ device }) {
+export default function DeviceCard({ device, showNetworkBadge }) {
   const [expanded, setExpanded] = useState(false)
   const isOnline = device.status === 'online'
   const icon = DEVICE_ICONS[device.deviceType] || DEVICE_ICONS.unknown
@@ -84,6 +84,11 @@ export default function DeviceCard({ device }) {
             {device.hostname}
             {device.vendor && device.vendor !== 'Unknown Vendor' && (
               <span className="vendor-badge">{device.vendor}</span>
+            )}
+            {showNetworkBadge && device.networkName && (
+              <span className="network-tag-badge">
+                📶 {device.networkName.split(' ')[0]}
+              </span>
             )}
           </div>
           <div className="device-ip">{device.ip}</div>
@@ -164,6 +169,12 @@ export default function DeviceCard({ device }) {
               <span className="detail-label">Last Seen</span>
               <span className="detail-value">{formatTime(device.lastSeen)}</span>
             </div>
+            {device.networkName && (
+              <div className="detail-item">
+                <span className="detail-label">Network Profile</span>
+                <span className="detail-value">{device.networkName}</span>
+              </div>
+            )}
             {isOnline && device.lastDisconnectedAt && (
               <div className="detail-item">
                 <span className="detail-label">Prev. Disconnected</span>

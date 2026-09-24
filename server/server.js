@@ -27,10 +27,22 @@ let selectedInterfaceName = null;
 let isInitialScan = true;
 const customTrackedIps = new Set();
 
-// SQLite prepared statement for device persistence
+// Active network profile state
+let activeNetwork = {
+  id: 'net_default',
+  name: 'Detecting Network...',
+  ssid: null,
+  subnet: '192.168.0',
+  localIp: '127.0.0.1',
+  netmask: '255.255.255.0',
+  interfaceName: 'WiFi',
+  gateway: '192.168.0.1'
+};
+
+// SQLite prepared statement for device persistence with network isolation
 const saveDeviceStmt = db.prepare(`
-  INSERT INTO devices (ip, hostname, mac, vendor, device_type, connected_at, disconnected_at, last_seen, status)
-  VALUES (@ip, @hostname, @mac, @vendor, @deviceType, @connectedAt, @disconnectedAt, @lastSeen, @status)
+  INSERT INTO devices (ip, hostname, mac, vendor, device_type, connected_at, disconnected_at, last_seen, status, network_id, network_name)
+  VALUES (@ip, @hostname, @mac, @vendor, @deviceType, @connectedAt, @disconnectedAt, @lastSeen, @status, @networkId, @networkName)
   ON CONFLICT(ip) DO UPDATE SET
     hostname = excluded.hostname,
     mac = excluded.mac,
@@ -39,12 +51,19 @@ const saveDeviceStmt = db.prepare(`
     connected_at = excluded.connected_at,
     disconnected_at = excluded.disconnected_at,
     last_seen = excluded.last_seen,
-    status = excluded.status
+    status = excluded.status,
+    network_id = excluded.network_id,
+    network_name = excluded.network_name
 `);
 
-function loadDevicesFromDb() {
+function loadDevicesFromDb(filterNetworkId = null) {
   try {
-    const rows = db.prepare('SELECT * FROM devices').all();
+    let rows;
+    if (filterNetworkId && filterNetworkId !== 'all') {
+      rows = db.prepare('SELECT * FROM devices WHERE network_id = ?').all(filterNetworkId);
+    } else {
+      rows = db.prepare('SELECT * FROM devices').all();
+    }
     for (const r of rows) {
       deviceRegistry.set(r.ip, {
         ip: r.ip,
@@ -56,6 +75,8 @@ function loadDevicesFromDb() {
         disconnectedAt: r.disconnected_at,
         lastSeen: r.last_seen,
         status: r.status,
+        networkId: r.network_id || 'default',
+        networkName: r.network_name || 'Default Network',
         latency: 1.5
       });
     }
@@ -75,7 +96,9 @@ function persistDevice(dev) {
       connectedAt: dev.connectedAt || Date.now(),
       disconnectedAt: dev.disconnectedAt || null,
       lastSeen: dev.lastSeen || Date.now(),
-      status: dev.status || 'online'
+      status: dev.status || 'online',
+      networkId: dev.networkId || (activeNetwork ? activeNetwork.id : 'default'),
+      networkName: dev.networkName || (activeNetwork ? activeNetwork.name : 'Default Network')
     });
   } catch (err) {
     console.error('Error saving device to db:', err);
@@ -83,15 +106,56 @@ function persistDevice(dev) {
 }
 
 const logHistoryStmt = db.prepare(`
-  INSERT INTO device_history (ip, hostname, mac, vendor, device_type, event_type, timestamp)
-  VALUES (?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO device_history (ip, hostname, mac, vendor, device_type, event_type, network_id, network_name, timestamp)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
-function logDeviceEvent(ip, hostname, mac, vendor, deviceType, eventType, timestamp = Date.now()) {
+function logDeviceEvent(ip, hostname, mac, vendor, deviceType, eventType, timestamp = Date.now(), netId = null, netName = null) {
   try {
-    logHistoryStmt.run(ip, hostname || 'Unknown', mac || 'Unknown', vendor || 'Unknown Vendor', deviceType || 'unknown', eventType, timestamp);
+    const targetNetId = netId || (activeNetwork ? activeNetwork.id : 'default');
+    const targetNetName = netName || (activeNetwork ? activeNetwork.name : 'Default Network');
+    logHistoryStmt.run(ip, hostname || 'Unknown', mac || 'Unknown', vendor || 'Unknown Vendor', deviceType || 'unknown', eventType, targetNetId, targetNetName, timestamp);
   } catch (err) {
     console.error('Error logging device event:', err);
+  }
+}
+
+function upsertNetwork(net, devCount = 0) {
+  try {
+    const existing = db.prepare('SELECT * FROM networks WHERE id = ?').get(net.id);
+    const now = Date.now();
+    if (!existing) {
+      db.prepare(`
+        INSERT INTO networks (id, name, ssid, subnet, gateway, local_ip, first_seen, last_seen, device_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(net.id, net.name, net.ssid || '', net.subnet, net.gateway, net.localIp, now, now, devCount);
+    } else {
+      db.prepare(`
+        UPDATE networks SET
+          name = ?, ssid = ?, subnet = ?, gateway = ?, local_ip = ?, last_seen = ?,
+          device_count = MAX(device_count, ?)
+        WHERE id = ?
+      `).run(net.name, net.ssid || '', net.subnet, net.gateway, net.localIp, now, devCount, net.id);
+    }
+  } catch (err) {
+    console.error('Network upsert error:', err);
+  }
+}
+
+function getAllNetworksWithStats() {
+  try {
+    const rows = db.prepare('SELECT * FROM networks ORDER BY last_seen DESC').all();
+    return rows.map(r => {
+      const liveOnline = Array.from(deviceRegistry.values()).filter(d => (d.networkId === r.id || d.network_id === r.id) && d.status === 'online').length;
+      return {
+        ...r,
+        isActive: activeNetwork && activeNetwork.id === r.id,
+        onlineCount: liveOnline
+      };
+    });
+  } catch (err) {
+    console.error('Error fetching networks:', err);
+    return [];
   }
 }
 
@@ -190,6 +254,49 @@ function getLocalSubnet() {
 
 function getLocalIp() {
   return getActiveInterface().address;
+}
+
+function getWifiSsid() {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') return resolve(null);
+    exec('netsh wlan show interfaces', { timeout: 1500 }, (err, stdout) => {
+      if (!err && stdout) {
+        const match = stdout.match(/^\s*SSID\s*:\s*(.+)$/m);
+        if (match && match[1]) {
+          const ssid = match[1].trim();
+          if (ssid && ssid !== '') return resolve(ssid);
+        }
+      }
+      resolve(null);
+    });
+  });
+}
+
+async function detectCurrentNetwork() {
+  const iface = getActiveInterface();
+  const ssid = await getWifiSsid();
+  
+  let networkName = ssid || (iface.isWifi ? 'Wi-Fi Network' : iface.name);
+  if (iface.subnet.startsWith('172.20.')) {
+    networkName = ssid ? `${ssid} (Campus Wi-Fi)` : 'MRC (Campus Wi-Fi)';
+  } else if (iface.subnet === '192.168.43') {
+    networkName = ssid ? `${ssid} (Mobile Hotspot)` : 'Mobile Hotspot';
+  } else if (ssid) {
+    networkName = ssid;
+  }
+
+  const networkId = `net_${(ssid || iface.name).replace(/[^a-zA-Z0-9_-]/g, '_')}_${iface.subnet.replace(/\./g, '_')}`;
+
+  return {
+    id: networkId,
+    name: networkName,
+    ssid: ssid || null,
+    subnet: iface.subnet,
+    localIp: iface.address,
+    netmask: iface.netmask,
+    interfaceName: iface.name,
+    gateway: `${iface.subnet}.1`
+  };
 }
 
 function lookupVendor(mac) {
@@ -330,9 +437,21 @@ async function scanSubnet() {
   if (isScanning) return;
   isScanning = true;
   try {
+    const detectedNet = await detectCurrentNetwork();
+    const isNetworkSwitched = activeNetwork && activeNetwork.id !== detectedNet.id;
+
+    if (!activeNetwork || isNetworkSwitched) {
+      console.log(`[Network Engine] Active network: ${detectedNet.name} (${detectedNet.subnet}.0/24)`);
+      activeNetwork = detectedNet;
+      deviceRegistry.clear();
+      loadDevicesFromDb(activeNetwork.id);
+      isInitialScan = true;
+      io.emit('network_switched', { activeNetwork, allNetworks: getAllNetworksWithStats() });
+    }
+
     const activeIface = getActiveInterface();
-    const subnet = activeIface.subnet;
-    const localIp = activeIface.address;
+    const subnet = activeNetwork.subnet;
+    const localIp = activeNetwork.localIp;
     const now = Date.now();
 
     // 1. Read ARP table neighbors
@@ -352,6 +471,8 @@ async function scanSubnet() {
         latency: 0.2,
         deviceType: 'laptop',
         vendor: 'Local Host Controller',
+        networkId: activeNetwork.id,
+        networkName: activeNetwork.name,
         lastSeen: now
       };
       deviceRegistry.set(localIp, selfDev);
@@ -362,6 +483,8 @@ async function scanSubnet() {
       selfDev.status = 'online';
       selfDev.lastSeen = now;
       selfDev.latency = 0.2;
+      selfDev.networkId = activeNetwork.id;
+      selfDev.networkName = activeNetwork.name;
     }
 
     // 2. Build list of IPs to scan
@@ -390,10 +513,8 @@ async function scanSubnet() {
           const hostname = await getHostname(ip);
           const deviceType = guessDeviceType(hostname, mac, vendor);
           
-          // Calculate natural initial connection time on cold start, or exact now for newly connected devices
           let connectedTime = now;
           if (isInitialScan && !existing) {
-            // Stagger pre-existing devices across the last 10-90 minutes so they reflect independent connection times
             const ipLastOctet = parseInt(ip.split('.').pop(), 10) || 1;
             const offsetMs = ((ipLastOctet * 47 + 131) % 5400) * 1000 + 300000;
             connectedTime = now - offsetMs;
@@ -412,17 +533,21 @@ async function scanSubnet() {
             latency: latency || 1.5,
             deviceType,
             vendor: vendor || 'Unknown Vendor',
+            networkId: activeNetwork.id,
+            networkName: activeNetwork.name,
             lastSeen: now
           };
           deviceRegistry.set(ip, device);
           persistDevice(device);
-          logDeviceEvent(ip, device.hostname, device.mac, device.vendor, device.deviceType, existing ? 'reconnected' : 'connected', now);
+          logDeviceEvent(ip, device.hostname, device.mac, device.vendor, device.deviceType, existing ? 'reconnected' : 'connected', now, activeNetwork.id, activeNetwork.name);
           io.emit('device_update', { type: existing ? 'reconnected' : 'new', device });
         } else {
           // Device active
           existing.status = 'online';
           existing.latency = latency || existing.latency;
           existing.lastSeen = now;
+          existing.networkId = activeNetwork.id;
+          existing.networkName = activeNetwork.name;
           if (mac && mac !== 'Unknown') existing.mac = mac;
           if (vendor) existing.vendor = vendor;
           deviceRegistry.set(ip, existing);
@@ -434,14 +559,16 @@ async function scanSubnet() {
         existing.disconnectedAt = now;
         deviceRegistry.set(ip, existing);
         persistDevice(existing);
-        logDeviceEvent(ip, existing.hostname, existing.mac, existing.vendor, existing.deviceType, 'disconnected', now);
+        logDeviceEvent(ip, existing.hostname, existing.mac, existing.vendor, existing.deviceType, 'disconnected', now, existing.networkId || activeNetwork.id, existing.networkName || activeNetwork.name);
         io.emit('device_update', { type: 'disconnected', device: existing });
       }
     }, 20);
 
+    upsertNetwork(activeNetwork, deviceRegistry.size);
     isInitialScan = false;
     const devices = Array.from(deviceRegistry.values());
     io.emit('device_list', devices);
+    io.emit('network_info', { active: activeNetwork, networks: getAllNetworksWithStats() });
   } catch (err) {
     console.error('Scan error:', err);
   } finally {
@@ -474,18 +601,64 @@ async function probeSingleIp(ip) {
     latency: latency || (isDetected ? 1.5 : null),
     deviceType,
     vendor: vendor || 'Unknown Vendor',
+    networkId: activeNetwork ? activeNetwork.id : 'default',
+    networkName: activeNetwork ? activeNetwork.name : 'Default Network',
     lastSeen: now
   };
   deviceRegistry.set(cleanIp, device);
   persistDevice(device);
-  logDeviceEvent(cleanIp, device.hostname, device.mac, device.vendor, device.deviceType, isDetected ? 'connected' : 'disconnected', now);
+  logDeviceEvent(cleanIp, device.hostname, device.mac, device.vendor, device.deviceType, isDetected ? 'connected' : 'disconnected', now, device.networkId, device.networkName);
   io.emit('device_update', { type: isDetected ? (existing ? 'reconnected' : 'new') : 'disconnected', device });
   io.emit('device_list', Array.from(deviceRegistry.values()));
   return device;
 }
 
 // REST endpoints
+app.get('/api/networks', (req, res) => {
+  res.json({
+    active: activeNetwork,
+    networks: getAllNetworksWithStats()
+  });
+});
+
 app.get('/api/devices', (req, res) => {
+  const { network } = req.query; // 'active' | 'all' | <network_id>
+  if (network === 'all') {
+    const all = db.prepare('SELECT * FROM devices ORDER BY last_seen DESC').all();
+    return res.json(all.map(r => ({
+      ip: r.ip,
+      hostname: r.hostname,
+      mac: r.mac,
+      vendor: r.vendor,
+      deviceType: r.device_type,
+      connectedAt: r.connected_at,
+      disconnectedAt: r.disconnected_at,
+      lastSeen: r.last_seen,
+      status: r.status,
+      networkId: r.network_id || 'default',
+      networkName: r.network_name || 'Default Network',
+      latency: 1.5
+    })));
+  }
+
+  if (network && network !== 'active' && network !== activeNetwork?.id) {
+    const rows = db.prepare('SELECT * FROM devices WHERE network_id = ? ORDER BY last_seen DESC').all(network);
+    return res.json(rows.map(r => ({
+      ip: r.ip,
+      hostname: r.hostname,
+      mac: r.mac,
+      vendor: r.vendor,
+      deviceType: r.device_type,
+      connectedAt: r.connected_at,
+      disconnectedAt: r.disconnected_at,
+      lastSeen: r.last_seen,
+      status: r.status,
+      networkId: r.network_id || 'default',
+      networkName: r.network_name || 'Default Network',
+      latency: 1.5
+    })));
+  }
+
   res.json(Array.from(deviceRegistry.values()));
 });
 
@@ -502,9 +675,22 @@ app.post('/api/probe', async (req, res) => {
 
 app.get('/api/history', (req, res) => {
   try {
-    const devices = db.prepare('SELECT * FROM devices ORDER BY last_seen DESC').all();
-    const events = db.prepare('SELECT * FROM device_history ORDER BY timestamp DESC LIMIT 200').all();
-    res.json({ devices, events });
+    const { network } = req.query;
+    let devicesQuery = 'SELECT * FROM devices';
+    let eventsQuery = 'SELECT * FROM device_history';
+    let params = [];
+
+    if (network && network !== 'all') {
+      devicesQuery += ' WHERE network_id = ?';
+      eventsQuery += ' WHERE network_id = ?';
+      params.push(network);
+    }
+    devicesQuery += ' ORDER BY last_seen DESC';
+    eventsQuery += ' ORDER BY timestamp DESC LIMIT 300';
+
+    const devices = db.prepare(devicesQuery).all(...params);
+    const events = db.prepare(eventsQuery).all(...params);
+    res.json({ devices, events, activeNetwork, networks: getAllNetworksWithStats() });
   } catch (err) {
     console.error('History API error:', err);
     res.status(500).json({ error: 'Failed to retrieve history' });
@@ -513,7 +699,12 @@ app.get('/api/history', (req, res) => {
 
 app.delete('/api/history', (req, res) => {
   try {
-    db.prepare('DELETE FROM device_history').run();
+    const { network } = req.query;
+    if (network && network !== 'all') {
+      db.prepare('DELETE FROM device_history WHERE network_id = ?').run(network);
+    } else {
+      db.prepare('DELETE FROM device_history').run();
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to clear history' });
@@ -523,17 +714,22 @@ app.delete('/api/history', (req, res) => {
 app.get('/api/subnet', (req, res) => {
   const activeIface = getActiveInterface();
   res.json({
-    subnet: activeIface.subnet,
-    localIp: activeIface.address,
+    subnet: activeNetwork ? activeNetwork.subnet : activeIface.subnet,
+    localIp: activeNetwork ? activeNetwork.localIp : activeIface.address,
     interfaceName: activeIface.name,
-    allInterfaces: getNetworkInterfacesList()
+    networkName: activeNetwork ? activeNetwork.name : activeIface.name,
+    networkId: activeNetwork ? activeNetwork.id : 'default',
+    allInterfaces: getNetworkInterfacesList(),
+    allNetworks: getAllNetworksWithStats()
   });
 });
 
 app.get('/api/interfaces', (req, res) => {
   res.json({
     active: getActiveInterface(),
-    available: getNetworkInterfacesList()
+    available: getNetworkInterfacesList(),
+    currentNetwork: activeNetwork,
+    allNetworks: getAllNetworksWithStats()
   });
 });
 
@@ -544,14 +740,17 @@ app.post('/api/interfaces/select', (req, res) => {
   deviceRegistry.clear();
   isInitialScan = true;
   scanSubnet();
-  res.json({ success: true, active: getActiveInterface() });
+  res.json({ success: true, active: getActiveInterface(), network: activeNetwork });
 });
 
 app.post('/api/devices/clear', (req, res) => {
+  const { network } = req.body;
+  if (network && network !== 'all') {
+    try { db.prepare('DELETE FROM devices WHERE network_id = ?').run(network); } catch {}
+  } else {
+    try { db.prepare('DELETE FROM devices').run(); } catch {}
+  }
   deviceRegistry.clear();
-  try {
-    db.prepare('DELETE FROM devices').run();
-  } catch {}
   isInitialScan = true;
   scanSubnet();
   res.json({ success: true });
@@ -559,6 +758,10 @@ app.post('/api/devices/clear', (req, res) => {
 
 io.on('connection', (socket) => {
   socket.emit('device_list', Array.from(deviceRegistry.values()));
+  socket.emit('network_info', {
+    active: activeNetwork,
+    networks: getAllNetworksWithStats()
+  });
   socket.emit('interface_info', {
     active: getActiveInterface(),
     available: getNetworkInterfacesList()
@@ -579,9 +782,11 @@ async function scanLoop() {
 }
 
 async function startScanning() {
-  loadDevicesFromDb();
+  activeNetwork = await detectCurrentNetwork();
+  upsertNetwork(activeNetwork, 0);
+  loadDevicesFromDb(activeNetwork.id);
   const iface = getActiveInterface();
-  console.log(`Starting real network scanner on interface: ${iface.name} (${iface.address}, Subnet: ${iface.subnet}.0/24)`);
+  console.log(`Starting real network scanner on network: ${activeNetwork.name} (${activeNetwork.subnet}.0/24, Interface: ${iface.name}, IP: ${activeNetwork.localIp})`);
   scanLoop();
 }
 

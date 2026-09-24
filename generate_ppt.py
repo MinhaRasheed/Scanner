@@ -144,7 +144,7 @@ def create_presentation(output_path):
     add_header(slide3, "How NetScan Pro Operates: 5 Core Steps", "SYSTEM WORKFLOW")
 
     steps = [
-        ("1. Subnet & Interface Auto-Detection", "Inspects physical network adapters (Wi-Fi/Ethernet) to detect host IP and calculate the CIDR subnet (e.g., 192.168.1.0/24 or 172.20.160.0/19)."),
+        ("1. SSID & Network Profile Isolation", "Automatically identifies Wi-Fi SSID and adapter CIDR subnet, provisioning an isolated device namespace per network environment."),
         ("2. Batched Ping Sweeps & Concurrency", "Executes concurrency-controlled ping sweeps across all 254 IP addresses every 6 seconds to discover alive hosts and measure latency without freezing."),
         ("3. ARP Inspection & Hardware OUI Resolution", "Extracts hardware MAC addresses from the ARP cache and matches OUI prefixes to identify manufacturers (Apple, Samsung, Intel, HP)."),
         ("4. Targeted Unicast IP Probing (⚡ Probe IP)", "Allows administrators to enter custom IPs (e.g., 172.20.181.188) to probe and track cross-subnet nodes or silent clients on demand."),
@@ -179,11 +179,11 @@ def create_presentation(output_path):
     add_header(slide4, "Key Features & Capabilities", "FEATURE MATRIX")
 
     features = [
+        ("🌐 Multi-Network Profile Isolation", "Automatically identifies SSIDs/subnets, isolating devices per Wi-Fi network with an active/historical profile switcher.", "🌐"),
         ("⚡ On-Demand Target Probing (Probe IP)", "Enter any specific IP to send direct ICMP/ARP probes and force-track custom or cross-subnet nodes.", "🎯"),
         ("📜 Persistent DB History & CSV Export", "Full historical audit trail in SQLite recording every connect/disconnect event with 1-click CSV download.", "💾"),
         ("🏷️ Hardware Vendor Identification", "Automatic MAC OUI dictionary matching identifies Apple, Samsung, OnePlus, Dell, HP, Xiaomi, and Google devices.", "🏷️"),
         ("🔔 Real-Time Live Toast Alerts", "Instant green/red popups when devices connect or drop off without requiring page reloads.", "🔔"),
-        ("⏱️ Dynamic Live Uptime & Latency", "Displays active session uptime counters and sub-millisecond round-trip latency badges.", "⏱️"),
         ("🛡️ Role-Based Access Control (RBAC)", "Secure dual-role system (Admin vs User) with bcrypt password hashing and user governance.", "🛡️")
     ]
 
@@ -368,11 +368,13 @@ def create_presentation(output_path):
     pc0.space_after = Pt(14)
 
     c_points = [
-        "Zero-Configuration Discovery: Automatically sweeps local subnets and provides targeted unicast (⚡ Probe IP) for custom network nodes.",
-        "Hardware Brand Recognition: Resolves manufacturer details (Apple, Samsung, Intel, etc.) directly from hardware MAC OUI prefixes.",
-        "Auditable DB Persistence: Permanently stores all connection/disconnection logs in SQLite with 1-click CSV report exports.",
-        "Enterprise Governance & Live Alerts: Secure dual-role RBAC authentication combined with sub-second WebSocket toast notifications."
+        ("Multi-Network Profile Isolation: Automatically detects SSID changes, isolates device tables per Wi-Fi environment, and offers seamless cross-network switching.",),
+        ("Zero-Configuration Discovery: Automatically sweeps local subnets and provides targeted unicast (⚡ Probe IP) for custom network nodes.",),
+        ("Hardware Brand Recognition: Resolves manufacturer details (Apple, Samsung, Intel, etc.) directly from hardware MAC OUI prefixes.",),
+        ("Auditable DB Persistence: Permanently stores all connection/disconnection logs in SQLite with 1-click CSV report exports.",),
+        ("Enterprise Governance & Live Alerts: Secure dual-role RBAC authentication combined with sub-second WebSocket toast notifications.",)
     ]
+    c_points = [p[0] for p in c_points]
 
     for pt in c_points:
         p = tf_c.add_paragraph()

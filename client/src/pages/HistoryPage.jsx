@@ -6,29 +6,32 @@ const API = import.meta.env.VITE_API_URL || 'http://localhost:3001'
 export default function HistoryPage() {
   const [historyDevices, setHistoryDevices] = useState([])
   const [events, setEvents] = useState([])
+  const [networks, setNetworks] = useState([])
+  const [networkFilter, setNetworkFilter] = useState('all') // 'all' | network_id
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all') // 'all' | 'online' | 'offline'
   const [activeTab, setActiveTab] = useState('devices') // 'devices' | 'events'
   const [toast, setToast] = useState(null)
 
-  const fetchHistory = useCallback(async () => {
+  const fetchHistory = useCallback(async (net = networkFilter) => {
     setLoading(true)
     try {
-      const res = await fetch(`${API}/api/history`)
+      const res = await fetch(`${API}/api/history?network=${net}`)
       const data = await res.json()
       setHistoryDevices(data.devices || [])
       setEvents(data.events || [])
+      if (data.networks) setNetworks(data.networks)
     } catch (err) {
       console.error('Failed to load history:', err)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [networkFilter])
 
   useEffect(() => {
-    fetchHistory()
-  }, [fetchHistory])
+    fetchHistory(networkFilter)
+  }, [fetchHistory, networkFilter])
 
   function showToast(msg) {
     setToast(msg)
@@ -52,13 +55,14 @@ export default function HistoryPage() {
 
   function exportCSV() {
     if (historyDevices.length === 0) return
-    const headers = ['IP Address', 'Hostname', 'MAC Address', 'Vendor / Manufacturer', 'Device Type', 'First Connected', 'Last Seen', 'Status']
+    const headers = ['IP Address', 'Hostname', 'MAC Address', 'Vendor / Manufacturer', 'Device Type', 'Network Environment', 'First Connected', 'Last Seen', 'Status']
     const rows = historyDevices.map(d => [
       `"${d.ip}"`,
       `"${d.hostname || ''}"`,
       `"${d.mac || ''}"`,
       `"${d.vendor || ''}"`,
       `"${d.device_type || ''}"`,
+      `"${d.network_name || 'Default'}"`,
       `"${d.connected_at ? new Date(d.connected_at).toISOString() : ''}"`,
       `"${d.last_seen ? new Date(d.last_seen).toISOString() : ''}"`,
       `"${d.status || ''}"`
@@ -187,6 +191,26 @@ export default function HistoryPage() {
             ))}
           </div>
         )}
+
+        {/* Network Environment Filter */}
+        {networks.length > 0 && (
+          <div className="hnetwork-wrap">
+            <span className="hnetwork-icon">📶</span>
+            <select
+              className="hnetwork-select"
+              value={networkFilter}
+              onChange={e => setNetworkFilter(e.target.value)}
+              title="Filter by Network Profile"
+            >
+              <option value="all">🌐 All Networks ({networks.length})</option>
+              {networks.map(n => (
+                <option key={n.id} value={n.id}>
+                  {n.name} ({n.subnet}.0/24)
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Table content */}
@@ -205,6 +229,7 @@ export default function HistoryPage() {
                   <th>IP Address</th>
                   <th>Hardware MAC</th>
                   <th>Vendor / Brand</th>
+                  <th>Network Profile</th>
                   <th>Type</th>
                   <th>First Connected</th>
                   <th>Last Seen</th>
@@ -214,7 +239,7 @@ export default function HistoryPage() {
               <tbody>
                 {filteredDevices.length === 0 ? (
                   <tr>
-                    <td colSpan="9" className="history-empty">
+                    <td colSpan="10" className="history-empty">
                       No devices matching your search criteria in the database.
                     </td>
                   </tr>
@@ -231,6 +256,9 @@ export default function HistoryPage() {
                       <td className="td-mac">{d.mac || '—'}</td>
                       <td>
                         <span className="hvendor-badge">{d.vendor || 'Unknown'}</span>
+                      </td>
+                      <td>
+                        <span className="hnet-tag">📶 {d.network_name || 'Default'}</span>
                       </td>
                       <td className="td-type">{d.device_type || 'Unknown'}</td>
                       <td className="td-time">{formatTime(d.connected_at)}</td>
@@ -258,13 +286,14 @@ export default function HistoryPage() {
                   <th>IP Address</th>
                   <th>Hardware MAC</th>
                   <th>Vendor</th>
+                  <th>Network Profile</th>
                   <th>Event Timestamp</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredEvents.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="history-empty">
+                    <td colSpan="8" className="history-empty">
                       No activity logs found.
                     </td>
                   </tr>
@@ -274,13 +303,18 @@ export default function HistoryPage() {
                       <td className="td-index">{i + 1}</td>
                       <td>
                         <span className={`hevent-badge ${ev.event_type === 'connected' ? 'event-connect' : ev.event_type === 'reconnected' ? 'event-reconnect' : 'event-disconnect'}`}>
-                          {ev.event_type === 'connected' ? '🟢 Connect' : ev.event_type === 'reconnected' ? '🔄 Reconnect' : '🔴 Disconnect'}
+                          {ev.event_type}
                         </span>
                       </td>
                       <td><strong>{ev.hostname}</strong></td>
                       <td className="td-ip">{ev.ip}</td>
                       <td className="td-mac">{ev.mac || '—'}</td>
-                      <td>{ev.vendor || 'Unknown'}</td>
+                      <td>
+                        <span className="hvendor-badge">{ev.vendor || 'Unknown'}</span>
+                      </td>
+                      <td>
+                        <span className="hnet-tag">📶 {ev.network_name || 'Default'}</span>
+                      </td>
                       <td className="td-time">{formatTime(ev.timestamp)}</td>
                     </tr>
                   ))

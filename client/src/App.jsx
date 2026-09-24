@@ -37,8 +37,9 @@ function Dashboard({ user, logout, page, setPage }) {
   const [subnet, setSubnet] = useState('')
   const [ifaceName, setIfaceName] = useState('')
   const [allInterfaces, setAllInterfaces] = useState([])
-  const [lastScan, setLastScan] = useState(null)
-  const [notifications, setNotifications] = useState([])
+  const [currentNetwork, setCurrentNetwork] = useState(null)
+  const [allNetworks, setAllNetworks] = useState([])
+  const [selectedNetwork, setSelectedNetwork] = useState('active') // 'active' | 'all' | network_id
   const socketRef = useRef(null)
   const notifId = useRef(0)
 
@@ -47,7 +48,31 @@ function Dashboard({ user, logout, page, setPage }) {
     socketRef.current = socket
     socket.on('connect', () => setConnected(true))
     socket.on('disconnect', () => setConnected(false))
-    socket.on('device_list', (list) => { setDevices(list); setScanning(false); setLastScan(Date.now()) })
+    socket.on('device_list', (list) => {
+      // Only auto-update if viewing active network
+      if (selectedNetwork === 'active') {
+        setDevices(list)
+        setScanning(false)
+        setLastScan(Date.now())
+      }
+    })
+    socket.on('network_info', (data) => {
+      if (data.active) {
+        setCurrentNetwork(data.active)
+        setSubnet(data.active.subnet)
+      }
+      if (data.networks) setAllNetworks(data.networks)
+    })
+    socket.on('network_switched', (data) => {
+      if (data.activeNetwork) {
+        setCurrentNetwork(data.activeNetwork)
+        setSubnet(data.activeNetwork.subnet)
+        addNotification('network_switch', {
+          hostname: `Switched network to ${data.activeNetwork.name}`
+        })
+      }
+      if (data.allNetworks) setAllNetworks(data.allNetworks)
+    })
     socket.on('interface_info', (data) => {
       if (data.active) {
         setSubnet(data.active.subnet)
@@ -66,13 +91,24 @@ function Dashboard({ user, logout, page, setPage }) {
       addNotification(type, device)
     })
 
-    fetch(`${SOCKET_URL}/api/devices`)
+    fetch(`${SOCKET_URL}/api/devices?network=active`)
       .then(r => r.json())
       .then(list => {
         if (Array.isArray(list)) {
           setDevices(list)
           setLastScan(Date.now())
         }
+      })
+      .catch(() => {})
+
+    fetch(`${SOCKET_URL}/api/networks`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.active) {
+          setCurrentNetwork(data.active)
+          setSubnet(data.active.subnet)
+        }
+        if (data.networks) setAllNetworks(data.networks)
       })
       .catch(() => {})
 
@@ -86,7 +122,22 @@ function Dashboard({ user, logout, page, setPage }) {
       .catch(() => {})
 
     return () => socket.disconnect()
-  }, [])
+  }, [selectedNetwork])
+
+  function handleNetworkChange(networkId) {
+    setSelectedNetwork(networkId)
+    setScanning(true)
+    fetch(`${SOCKET_URL}/api/devices?network=${networkId}`)
+      .then(r => r.json())
+      .then(list => {
+        if (Array.isArray(list)) {
+          setDevices(list)
+          setLastScan(Date.now())
+        }
+        setScanning(false)
+      })
+      .catch(() => setScanning(false))
+  }
 
   function handleDeviceProbed(probedDevice) {
     if (!probedDevice) return
@@ -200,23 +251,28 @@ function Dashboard({ user, logout, page, setPage }) {
             {connected ? 'Live' : 'Offline'}
           </div>
 
-          {/* Network Interface selector */}
-          {allInterfaces.length > 1 ? (
+          {/* Multi-Network Profile Selector */}
+          <div className="network-selector-wrap">
+            <span className="network-icon">📶</span>
             <select
-              value={ifaceName}
-              onChange={e => handleInterfaceChange(e.target.value)}
-              className="interface-select"
-              title="Select network interface"
+              value={selectedNetwork}
+              onChange={e => handleNetworkChange(e.target.value)}
+              className="network-select"
+              title="Select network profile view"
             >
-              {allInterfaces.map(i => (
-                <option key={i.name} value={i.name}>
-                  {i.name} ({i.address})
-                </option>
-              ))}
+              <option value="active">
+                🟢 {currentNetwork ? currentNetwork.name : (ifaceName || 'WiFi')} ({currentNetwork ? currentNetwork.subnet : subnet}.0/24) [Active]
+              </option>
+              {allNetworks
+                .filter(n => n.id !== currentNetwork?.id)
+                .map(n => (
+                  <option key={n.id} value={n.id}>
+                    📁 {n.name} ({n.subnet}.0/24) — {n.device_count || 0} devs
+                  </option>
+                ))}
+              <option value="all">🌐 All Networks Combined</option>
             </select>
-          ) : (
-            <div className="subnet-badge">{ifaceName || 'WiFi'} ({subnet}.0/24)</div>
-          )}
+          </div>
 
           {lastScan && <div className="last-scan-time">{new Date(lastScan).toLocaleTimeString()}</div>}
           {page === 'dashboard' && (
@@ -288,7 +344,13 @@ function Dashboard({ user, logout, page, setPage }) {
               </div>
             ) : (
               <div className="device-grid">
-                {filtered.map(device => <DeviceCard key={device.ip} device={device} />)}
+                {filtered.map(device => (
+                  <DeviceCard
+                    key={device.ip}
+                    device={device}
+                    showNetworkBadge={selectedNetwork === 'all'}
+                  />
+                ))}
               </div>
             )}
           </>

@@ -12,7 +12,19 @@ db.exec(`
     role TEXT DEFAULT 'user',
     created_at TEXT DEFAULT (datetime('now')),
     last_login TEXT
-  )
+  );
+
+  CREATE TABLE IF NOT EXISTS devices (
+    ip TEXT PRIMARY KEY,
+    hostname TEXT,
+    mac TEXT,
+    vendor TEXT,
+    device_type TEXT,
+    connected_at INTEGER,
+    disconnected_at INTEGER,
+    last_seen INTEGER,
+    status TEXT DEFAULT 'online'
+  );
 `);
 
 module.exports = db;

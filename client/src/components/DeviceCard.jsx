@@ -57,7 +57,7 @@ function formatTime(ts) {
 }
 
 function formatDuration(start, end) {
-  const diff = (end || Date.now()) - start
+  const diff = Math.max(0, (end || Date.now()) - start)
   const s = Math.floor(diff / 1000)
   const m = Math.floor(s / 60)
   const h = Math.floor(m / 60)
@@ -106,7 +106,9 @@ export default function DeviceCard({ device }) {
           </span>
           <span className="time-value connected-time">{formatTime(device.connectedAt)}</span>
         </div>
-        {device.disconnectedAt && (
+
+        {/* Only show Disconnected time when the device is actually offline */}
+        {!isOnline && device.disconnectedAt && (
           <div className="time-row">
             <span className="time-label">
               <span className="time-icon">🔴</span> Disconnected
@@ -114,6 +116,8 @@ export default function DeviceCard({ device }) {
             <span className="time-value disconnected-time">{formatTime(device.disconnectedAt)}</span>
           </div>
         )}
+
+        {/* Show live uptime when online */}
         {isOnline && device.connectedAt && (
           <div className="time-row">
             <span className="time-label">
@@ -122,6 +126,8 @@ export default function DeviceCard({ device }) {
             <span className="time-value uptime-value">{formatDuration(device.connectedAt)}</span>
           </div>
         )}
+
+        {/* Show total connected duration when offline */}
         {!isOnline && device.connectedAt && device.disconnectedAt && (
           <div className="time-row">
             <span className="time-label">
@@ -152,6 +158,12 @@ export default function DeviceCard({ device }) {
               <span className="detail-label">Latency</span>
               <span className="detail-value">{device.latency != null ? `${device.latency.toFixed(1)} ms` : '—'}</span>
             </div>
+            {isOnline && device.lastDisconnectedAt && (
+              <div className="detail-item">
+                <span className="detail-label">Prev. Disconnected</span>
+                <span className="detail-value">{formatTime(device.lastDisconnectedAt)}</span>
+              </div>
+            )}
           </div>
         </div>
       )}

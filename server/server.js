@@ -164,11 +164,12 @@ async function scanSubnet() {
           const deviceType = guessDeviceType(hostname, mac);
           const device = {
             ip,
-            hostname: hostname || `Device-${ip.split('.').pop()}`,
-            mac: mac || 'Unknown',
+            hostname: hostname || (existing ? existing.hostname : `Device-${ip.split('.').pop()}`),
+            mac: mac !== 'Unknown' ? mac : (existing ? existing.mac : 'Unknown'),
             status: 'online',
             connectedAt: now,
-            disconnectedAt: existing ? existing.disconnectedAt : null,
+            disconnectedAt: null,
+            lastDisconnectedAt: existing ? existing.disconnectedAt : null,
             latency,
             deviceType,
             lastSeen: now

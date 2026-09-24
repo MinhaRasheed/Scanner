@@ -5,6 +5,7 @@ const API = import.meta.env.VITE_API_URL || 'http://localhost:3001'
 
 export default function FilterBar({ filter, setFilter, search, setSearch, totalResults }) {
   const [probing, setProbing] = useState(false)
+  const [probeStatus, setProbeStatus] = useState(null)
   const isIpQuery = /^(\d{1,3}\.){3}\d{1,3}$/.test(search.trim())
 
   const categories = [
@@ -13,19 +14,37 @@ export default function FilterBar({ filter, setFilter, search, setSearch, totalR
     { id: 'offline', label: 'Offline', icon: '⚪' },
   ]
 
-  async function handleProbeIp() {
-    if (!isIpQuery || probing) return
+  async function handleProbeIp(targetIp) {
+    const ipToProbe = targetIp || search.trim()
+    if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ipToProbe) || probing) return
     setProbing(true)
+    setProbeStatus({ type: 'loading', message: `Probing target IP ${ipToProbe}...` })
     try {
-      await fetch(`${API}/api/probe`, {
+      const res = await fetch(`${API}/api/probe`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ip: search.trim() })
+        body: JSON.stringify({ ip: ipToProbe })
       })
+      const data = await res.json()
+      if (data.device) {
+        setProbeStatus({
+          type: 'success',
+          message: `Target ${ipToProbe} registered! Status: ${data.device.status.toUpperCase()} (${data.device.vendor || 'Unknown Vendor'})`
+        })
+      } else {
+        setProbeStatus({ type: 'error', message: `Could not reach ${ipToProbe}` })
+      }
     } catch (err) {
-      console.error('Probe error:', err)
+      setProbeStatus({ type: 'error', message: `Probe failed: ${err.message}` })
     } finally {
       setProbing(false)
+      setTimeout(() => setProbeStatus(null), 6000)
+    }
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Enter' && isIpQuery) {
+      handleProbeIp()
     }
   }
 
@@ -49,26 +68,37 @@ export default function FilterBar({ filter, setFilter, search, setSearch, totalR
         <input
           className="search-input"
           type="text"
-          placeholder="Search IP, device name, hardware MAC, brand (Apple, Samsung)..."
+          placeholder="Search device name, brand, or type an IP (e.g. 172.20.181.188)..."
           value={search}
           onChange={e => setSearch(e.target.value)}
+          onKeyDown={handleKeyDown}
         />
-        {search && (
+        {search && !isIpQuery && (
           <button className="search-clear" onClick={() => setSearch('')} title="Clear search">✕</button>
         )}
-        {isIpQuery && (
-          <button className="probe-btn" onClick={handleProbeIp} disabled={probing} title="Probe and discover this exact IP immediately">
-            {probing ? '⚡ Probing...' : '⚡ Probe IP'}
-          </button>
-        )}
+        <button
+          className={`probe-btn ${isIpQuery ? 'probe-btn-active' : ''}`}
+          onClick={() => handleProbeIp()}
+          disabled={probing || !isIpQuery}
+          title={isIpQuery ? "Probe this exact IP address now (or press Enter)" : "Type a complete IPv4 address to probe"}
+        >
+          {probing ? '⚡ Probing...' : '⚡ Probe IP'}
+        </button>
       </div>
+
+      {probeStatus && (
+        <div className={`probe-status-banner probe-status-${probeStatus.type}`}>
+          <span>{probeStatus.type === 'loading' ? '⏳' : probeStatus.type === 'success' ? '✅' : '⚠️'}</span>
+          {probeStatus.message}
+        </div>
+      )}
 
       {search && (
         <div className="search-indicator">
           Found <strong>{totalResults}</strong> {totalResults === 1 ? 'device' : 'devices'} matching "{search}"
           {isIpQuery && totalResults === 0 && (
             <span className="probe-hint">
-              {' — '}Device not listed? Click <strong>⚡ Probe IP</strong> above to ping and discover it directly!
+              {' — '}Press <strong>Enter</strong> or click <strong>⚡ Probe IP</strong> to target and register this device!
             </span>
           )}
         </div>

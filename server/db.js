@@ -25,6 +25,17 @@ db.exec(`
     last_seen INTEGER,
     status TEXT DEFAULT 'online'
   );
+
+  CREATE TABLE IF NOT EXISTS device_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip TEXT NOT NULL,
+    hostname TEXT,
+    mac TEXT,
+    vendor TEXT,
+    device_type TEXT,
+    event_type TEXT,
+    timestamp INTEGER NOT NULL
+  );
 `);
 
 module.exports = db;

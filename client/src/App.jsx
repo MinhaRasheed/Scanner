@@ -6,6 +6,7 @@ import ScanAnimation from './components/ScanAnimation'
 import FilterBar from './components/FilterBar'
 import AuthPage from './pages/AuthPage'
 import AdminPage from './pages/AdminPage'
+import HistoryPage from './pages/HistoryPage'
 import { useAuth } from './context/AuthContext'
 import './App.css'
 
@@ -104,8 +105,13 @@ function Dashboard({ user, logout, page, setPage }) {
   const filtered = devices
     .filter(d => filter === 'all' || d.status === filter)
     .filter(d => {
-      const q = search.toLowerCase()
-      return !q || d.ip.includes(q) || d.hostname?.toLowerCase().includes(q) || d.mac?.toLowerCase().includes(q) || d.vendor?.toLowerCase().includes(q)
+      const q = search.toLowerCase().trim()
+      return !q ||
+        d.ip.toLowerCase().includes(q) ||
+        (d.hostname && d.hostname.toLowerCase().includes(q)) ||
+        (d.mac && d.mac.toLowerCase().includes(q)) ||
+        (d.vendor && d.vendor.toLowerCase().includes(q)) ||
+        (d.deviceType && d.deviceType.toLowerCase().includes(q))
     })
     .sort((a, b) => {
       if (a.status === 'online' && b.status !== 'online') return -1
@@ -153,6 +159,9 @@ function Dashboard({ user, logout, page, setPage }) {
           <nav className="nav-tabs">
             <button className={`nav-tab ${page === 'dashboard' ? 'nav-tab-active' : ''}`} onClick={() => setPage('dashboard')}>
               🌐 Live Dashboard
+            </button>
+            <button className={`nav-tab ${page === 'history' ? 'nav-tab-active' : ''}`} onClick={() => setPage('history')}>
+              📜 Device History & DB
             </button>
             {user.role === 'admin' && (
               <button className={`nav-tab ${page === 'admin' ? 'nav-tab-active' : ''}`} onClick={() => setPage('admin')}>
@@ -209,16 +218,30 @@ function Dashboard({ user, logout, page, setPage }) {
       <main className="main">
         {page === 'admin' ? (
           <AdminPage />
+        ) : page === 'history' ? (
+          <HistoryPage />
         ) : (
           <>
             <StatsBar online={online} offline={offline} total={devices.length} scanning={scanning} />
             {scanning && <ScanAnimation subnet={subnet} />}
-            <FilterBar filter={filter} setFilter={setFilter} search={search} setSearch={setSearch} />
+            <FilterBar
+              filter={filter}
+              setFilter={setFilter}
+              search={search}
+              setSearch={setSearch}
+              totalResults={filtered.length}
+            />
             {filtered.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-icon">{scanning ? '📡' : devices.length === 0 ? '🔍' : '🔎'}</div>
                 <p className="empty-text">
-                  {scanning ? 'Scanning active Wi-Fi network...' : devices.length === 0 ? 'Searching for live devices on this network...' : 'No devices match your filter.'}
+                  {search
+                    ? `No devices matching "${search}". Try searching for an IP or vendor name.`
+                    : scanning
+                    ? 'Scanning active Wi-Fi network...'
+                    : devices.length === 0
+                    ? 'Searching for live devices on this network...'
+                    : 'No devices match your filter.'}
                 </p>
               </div>
             ) : (

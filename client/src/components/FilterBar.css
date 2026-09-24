@@ -39,20 +39,15 @@
   border: 1px solid rgba(0, 212, 255, 0.2);
 }
 
-.tab-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+.tab-icon {
+  font-size: 14px;
 }
-
-.tdot-blue { background: #00d4ff; }
-.tdot-green { background: #22c55e; }
-.tdot-red { background: #ef4444; }
 
 .search-wrap {
   position: relative;
   display: flex;
   align-items: center;
+  min-width: 320px;
 }
 
 .search-icon {
@@ -63,34 +58,45 @@
 }
 
 .search-input {
+  width: 100%;
   background: rgba(15, 20, 40, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
-  padding: 9px 36px 9px 36px;
+  padding: 10px 36px 10px 36px;
   color: #e2e8f0;
   font-size: 13px;
-  width: 280px;
   outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: all 0.2s ease;
 }
 
-.search-input::placeholder { color: #334155; }
+.search-input::placeholder { color: #475569; }
 
 .search-input:focus {
-  border-color: rgba(0, 212, 255, 0.3);
-  box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.06);
+  border-color: rgba(0, 212, 255, 0.5);
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.15);
 }
 
 .search-clear {
   position: absolute;
-  right: 10px;
+  right: 12px;
   background: none;
   border: none;
-  color: #475569;
+  color: #64748b;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 14px;
   padding: 2px 4px;
   border-radius: 4px;
 }
 
-.search-clear:hover { color: #94a3b8; }
+.search-clear:hover { color: #f8fafc; }
+
+.search-indicator {
+  width: 100%;
+  font-size: 13px;
+  color: #38bdf8;
+  padding: 6px 12px;
+  background: rgba(56, 189, 248, 0.08);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  border-radius: 8px;
+  animation: fadeIn 0.2s ease;
+}

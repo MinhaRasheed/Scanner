@@ -400,6 +400,7 @@ async function scanSubnet() {
           };
           deviceRegistry.set(ip, device);
           persistDevice(device);
+          logDeviceEvent(ip, device.hostname, device.mac, device.vendor, device.deviceType, existing ? 'reconnected' : 'connected', now);
           io.emit('device_update', { type: existing ? 'reconnected' : 'new', device });
         } else {
           // Device active
@@ -417,6 +418,7 @@ async function scanSubnet() {
         existing.disconnectedAt = now;
         deviceRegistry.set(ip, existing);
         persistDevice(existing);
+        logDeviceEvent(ip, existing.hostname, existing.mac, existing.vendor, existing.deviceType, 'disconnected', now);
         io.emit('device_update', { type: 'disconnected', device: existing });
       }
     }, 20);
@@ -434,6 +436,26 @@ async function scanSubnet() {
 // REST endpoints
 app.get('/api/devices', (req, res) => {
   res.json(Array.from(deviceRegistry.values()));
+});
+
+app.get('/api/history', (req, res) => {
+  try {
+    const devices = db.prepare('SELECT * FROM devices ORDER BY last_seen DESC').all();
+    const events = db.prepare('SELECT * FROM device_history ORDER BY timestamp DESC LIMIT 200').all();
+    res.json({ devices, events });
+  } catch (err) {
+    console.error('History API error:', err);
+    res.status(500).json({ error: 'Failed to retrieve history' });
+  }
+});
+
+app.delete('/api/history', (req, res) => {
+  try {
+    db.prepare('DELETE FROM device_history').run();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to clear history' });
+  }
 });
 
 app.get('/api/subnet', (req, res) => {

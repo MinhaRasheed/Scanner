@@ -90,6 +90,28 @@
 
 .search-clear:hover { color: #f8fafc; }
 
+.probe-btn {
+  margin-left: 8px;
+  background: linear-gradient(135deg, #00d4ff 0%, #0284c7 100%);
+  color: #041226;
+  border: none;
+  padding: 9px 14px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.probe-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 15px rgba(0, 212, 255, 0.4);
+}
+
 .search-indicator {
   width: 100%;
   font-size: 13px;
@@ -99,4 +121,9 @@
   border: 1px solid rgba(56, 189, 248, 0.2);
   border-radius: 8px;
   animation: fadeIn 0.2s ease;
+}
+
+.probe-hint {
+  color: #e2e8f0;
+  font-size: 12px;
 }

@@ -81,6 +81,19 @@ function persistDevice(dev) {
   }
 }
 
+const logHistoryStmt = db.prepare(`
+  INSERT INTO device_history (ip, hostname, mac, vendor, device_type, event_type, timestamp)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
+`);
+
+function logDeviceEvent(ip, hostname, mac, vendor, deviceType, eventType, timestamp = Date.now()) {
+  try {
+    logHistoryStmt.run(ip, hostname || 'Unknown', mac || 'Unknown', vendor || 'Unknown Vendor', deviceType || 'unknown', eventType, timestamp);
+  } catch (err) {
+    console.error('Error logging device event:', err);
+  }
+}
+
 // Common MAC OUI vendor prefix dictionary for accurate real device identification
 const OUI_MAP = {
   '50:EB:71': 'Intel / PC',
@@ -433,9 +446,54 @@ async function scanSubnet() {
   }
 }
 
+// Probe single IP directly on demand
+async function probeSingleIp(ip) {
+  const cleanIp = ip.trim();
+  const now = Date.now();
+  const { alive, latency } = await pingHost(cleanIp);
+  const mac = await getMacFromArpTable(cleanIp);
+  const vendor = lookupVendor(mac);
+  const hostname = await getHostname(cleanIp);
+  const deviceType = guessDeviceType(hostname, mac, vendor);
+
+  const isDetected = alive || (mac && mac !== 'Unknown');
+  const existing = deviceRegistry.get(cleanIp);
+  
+  const device = {
+    ip: cleanIp,
+    hostname: hostname || (vendor ? `${vendor.split(' ')[0]}-${cleanIp.split('.').pop()}` : `Device-${cleanIp.split('.').pop()}`),
+    mac: mac || 'Unknown',
+    status: isDetected ? 'online' : 'offline',
+    connectedAt: existing ? existing.connectedAt : now,
+    disconnectedAt: isDetected ? null : now,
+    lastDisconnectedAt: existing ? existing.disconnectedAt : null,
+    latency: latency || (isDetected ? 1.5 : null),
+    deviceType,
+    vendor: vendor || 'Unknown Vendor',
+    lastSeen: now
+  };
+  deviceRegistry.set(cleanIp, device);
+  persistDevice(device);
+  logDeviceEvent(cleanIp, device.hostname, device.mac, device.vendor, device.deviceType, isDetected ? 'connected' : 'disconnected', now);
+  io.emit('device_update', { type: isDetected ? (existing ? 'reconnected' : 'new') : 'disconnected', device });
+  io.emit('device_list', Array.from(deviceRegistry.values()));
+  return device;
+}
+
 // REST endpoints
 app.get('/api/devices', (req, res) => {
   res.json(Array.from(deviceRegistry.values()));
+});
+
+app.post('/api/probe', async (req, res) => {
+  const { ip } = req.body;
+  if (!ip) return res.status(400).json({ error: 'IP address required' });
+  try {
+    const device = await probeSingleIp(ip);
+    res.json({ success: true, device });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/history', (req, res) => {

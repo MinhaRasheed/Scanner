@@ -40,6 +40,8 @@ function Dashboard({ user, logout, page, setPage }) {
   const [currentNetwork, setCurrentNetwork] = useState(null)
   const [allNetworks, setAllNetworks] = useState([])
   const [selectedNetwork, setSelectedNetwork] = useState('active') // 'active' | 'all' | network_id
+  const [lastScan, setLastScan] = useState(null)
+  const [notifications, setNotifications] = useState([])
   const socketRef = useRef(null)
   const notifId = useRef(0)
 
